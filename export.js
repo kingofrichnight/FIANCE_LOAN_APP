@@ -35,7 +35,7 @@
     head.height = 44;
     head.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF157347' } }; cell.alignment = { wrapText: true, vertical: 'middle' }; });
     sheet.autoFilter = { from: 'A1', to: { row: Math.max(1, sheet.rowCount), column: core.headers.length } };
-    sheet.getCell('T1').note = `Status as of ${asOf}. Red rows are overdue or paid late. No automatic late fees. One received total and date per installment. Blank principal/interest splits mean the older loan has no stored interest rate. Each row uses its own Currency column; no conversion.`;
+    sheet.getCell('T1').note = `Status as of ${asOf}. Red rows are overdue or paid late. No automatic late fees. One received total and date per installment. Custom monthly plans use the entered amount every month; their rate and principal/interest splits are blank because no interest calculation is applied. Each row uses its own Currency column; no conversion.`;
     return book;
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = { workbook };

@@ -43,6 +43,23 @@ test('invalid terms or edits that erase/overpay existing installments are reject
   assert.throws(() => C.validateLoan(loan({ firstDue: '2026-02-30' })));
   assert.throws(() => C.validateLoan(loan({ payments: { 13: { amount: 100, date: '2026-06-01' } } })));
   assert.throws(() => C.validateLoan(loan({ payments: { 1: { amount: 101, date: '2026-06-01' } } })));
+  assert.throws(() => C.validateLoan(loan({ payments: { '01': { amount: 100, date: '2026-06-01' } } })));
+});
+
+test('custom monthly plans use the exact entered due for every month, independent of principal and APR', () => {
+  for (const monthly of [250, 500]) {
+    const custom = C.validateLoan(loan({ repaymentMode: 'custom', amount: 1000, months: 3, rate: null, payment: monthly }));
+    const rows = C.schedule(custom);
+    assert.deepEqual(rows.map(row => row.dueAmount), [monthly, monthly, monthly]);
+    assert.ok(rows.every(row => row.interest === null && row.principal === null && row.balance === null));
+    const output = C.exportRows([custom])[0];
+    assert.equal(output[9], null); assert.equal(output[22], 'Custom monthly payment');
+    assert.equal(C.migrate([custom])[0].payment, monthly);
+  }
+  assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: 0 })));
+  assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: 12.345 })));
+  assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: NaN })));
+  assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: 80, payments: { 1: { amount: 100, date: '2026-01-31' } } })));
 });
 test('CSV includes all months and currencies, quotes multiline text and neutralizes formula injection', () => {
   const input = [loan({ name: '=HYPERLINK("bad")', address: 'Line 1,\nLine 2' }), loan({ id: 'other', currency: 'CNY' })];

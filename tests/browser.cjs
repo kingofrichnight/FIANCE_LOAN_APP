@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const C = require('../core.js');
+const V = require('../vault.js');
+const testPassword = 'Synthetic local password 2026';
 const root = path.resolve(__dirname, '..');
 const out = path.resolve(root, '..', 'qa');
 const server = http.createServer(async (req, res) => {
@@ -19,13 +21,28 @@ async function main() {
   const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || undefined, headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
   const page = await context.newPage(), errors = [];
+  const remoteRequests = [];
+  context.on('request', request => { if (/^https?:/.test(request.url()) && !request.url().startsWith(url + '/')) remoteRequests.push(request.url()); });
   page.on('pageerror', error => errors.push(error.message));
   const click = name => page.getByRole('button', { name, exact: true }).click();
   const visible = async locator => { await locator.waitFor({ state: 'visible', timeout: 5000 }); assert.equal(await locator.isVisible(), true); };
   const hidden = async locator => { await locator.waitFor({ state: 'hidden', timeout: 5000 }); assert.equal(await locator.isVisible(), false); };
   const download = async (action, filename) => { const waiting = page.waitForEvent('download'); await action(); const file = await waiting; const target = path.join(out, filename); await file.saveAs(target); assert.equal(await file.failure(), null); return target; };
+  const unlock = async (password = testPassword) => { await page.locator('#authForm [name=password]').fill(password); await page.locator('#authSubmit').click(); await visible(page.locator('#appShell')); };
+  const backupPassword = async (password = testPassword) => { await page.locator('#passwordForm [name=password]').fill(password); await page.locator('#passwordForm').getByRole('button', { name: 'Continue' }).click(); };
+  const injectPortfolio = async portfolio => {
+    const encrypted = await V.create({ version: 1, profile: { name: 'QA profile' }, portfolio }, testPassword);
+    await page.evaluate(data => localStorage.setItem('lendwiseVaultV1', JSON.stringify(data)), encrypted.record);
+    await page.reload(); await unlock();
+  };
   try {
     await page.goto(url);
+    await hidden(page.locator('#appShell'));
+    await page.locator('#authForm [name=profileName]').fill('QA profile');
+    await page.locator('#authForm [name=password]').fill(testPassword);
+    await page.locator('#authForm [name=confirmPassword]').fill(testPassword);
+    await page.locator('#localConsentField input').check(); await page.locator('#authSubmit').click();
+    await visible(page.locator('#appShell'));
     await visible(page.getByText('No borrowers yet. Add your first borrower to begin.'));
     // Close and cancel work even when required fields are empty. Escape restores focus.
     await page.locator('#newLoanTop').click();
@@ -45,10 +62,12 @@ async function main() {
     assert.equal(await page.locator('#borrowerRows strong').first().textContent(), name);
     assert.equal(await page.locator('#borrowerRows b').count(), 0);
     assert.ok((await page.locator('#totalOutstanding').textContent()).includes('1,200'));
-    await page.reload(); await visible(page.getByText(name, { exact: true }).first());
+    await page.reload(); await hidden(page.locator('#appShell'));
+    await page.locator('#authForm [name=password]').fill('wrong password'); await page.locator('#authSubmit').click(); await visible(page.locator('#authError')); await hidden(page.locator('#appShell'));
+    await unlock(); await visible(page.getByText(name, { exact: true }).first());
     await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).click();
     assert.equal(await fields.locator('[name=phone]').inputValue(), '+91 9000000000');
-    await fields.locator('[name=amount]').fill('1800'); await click('Save changes');
+    await fields.locator('[name=amount]').fill('1800'); await click('Save changes'); await hidden(page.locator('#loanModal'));
     assert.ok((await page.locator('#totalOutstanding').textContent()).includes('1,800'));
     await page.locator('#borrowerRows').getByRole('button', { name: 'Payments', exact: true }).click();
     assert.equal(await page.locator('#paymentRows tr').count(), 3);
@@ -56,7 +75,7 @@ async function main() {
     await click('Save payment'); await hidden(page.locator('#receiptModal'));
     assert.ok((await page.locator('#paymentRows tr').first().textContent()).includes('Paid late'));
     await page.locator('#paymentRows tr').nth(1).getByRole('button').click();
-    await page.locator('#receiptForm [name=amount]').fill('100'); await click('Save payment');
+    await page.locator('#receiptForm [name=amount]').fill('100'); await click('Save payment'); await hidden(page.locator('#receiptModal'));
     assert.ok((await page.locator('#paymentRows tr').nth(1).textContent()).includes('Overdue (partial)'));
     assert.ok((await page.locator('#totalOutstanding').textContent()).includes('1,100'));
     await page.screenshot({ path: path.join(out, 'repayments-desktop.png'), fullPage: true });
@@ -88,7 +107,10 @@ async function main() {
     await page.locator('#utilityModal .close[data-close]').click();
     await click('Settings & backup'); await page.locator('#settingsCurrency').selectOption('CNY'); assert.ok((await page.locator('#totalOutstanding').textContent()).includes('0.00'));
     await page.locator('#settingsCurrency').selectOption('INR');
-    const backupPath = await download(() => click('Download backup'), 'portfolio.json');
+    const backupPath = await download(() => click('Download encrypted backup'), 'portfolio.json');
+    const rawBackup = await fs.readFile(backupPath, 'utf8');
+    assert.equal(rawBackup.includes(name), false); assert.equal(rawBackup.includes('+91'), false); assert.equal(rawBackup.includes(testPassword), false);
+    const decryptedBackup = await V.unlock(rawBackup, testPassword);
     await page.locator('#utilityModal .close[data-close]').click();
     await page.locator('#borrowerRows').getByRole('button', { name: 'Delete', exact: true }).click();
     await page.locator('#confirmModal').getByRole('button', { name: 'Cancel' }).click(); await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
@@ -96,12 +118,12 @@ async function main() {
     await visible(page.getByText('No borrowers yet. Add your first borrower to begin.'));
     await click('Settings & backup'); await click('Undo last deletion'); await page.locator('#utilityModal .close[data-close]').click();
     await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
-    await click('Settings & backup'); await page.locator('#restoreInput').setInputFiles(backupPath); await click('Restore backup'); await page.locator('#utilityModal .close[data-close]').click();
-    await page.reload(); await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
+    await click('Settings & backup'); await page.locator('#restoreInput').setInputFiles(backupPath); await backupPassword(); await click('Restore backup'); await visible(page.getByText('Backup restored.', { exact: true })); await page.locator('#utilityModal .close[data-close]').click();
+    await page.reload(); await unlock(); await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
     // Populate only this isolated test browser to verify pagination and multiple currencies.
-    const payload = JSON.parse(await fs.readFile(backupPath, 'utf8'));
+    const payload = decryptedBackup.payload.portfolio;
     payload.loans = [...payload.loans, ...Array.from({ length: 10 }, (_, i) => ({ ...payload.loans[0], id: `extra-${i}`, name: `Borrower ${i}`, payments: {}, documents: [], currency: i === 9 ? 'CNY' : 'INR' }))];
-    await page.evaluate(data => localStorage.setItem('lendwisePortfolioV3', JSON.stringify(data)), payload); await page.reload();
+    await injectPortfolio(payload);
     assert.equal(await page.locator('#borrowerRows tr').count(), 8); await click('Next page'); assert.equal(await page.locator('#borrowerRows tr').count(), 2); await click('Previous page');
     await page.locator('#sortSelect').selectOption('amount'); await page.locator('#sortSelect').selectOption('due');
     await page.locator('#currencySelect').selectOption('CNY'); assert.equal(await page.locator('#borrowerRows tr').count(), 1); await page.locator('#currencySelect').selectOption('INR');
@@ -125,17 +147,102 @@ async function main() {
     await page.locator('#borrowerRows').getByRole('button', { name: 'Payments', exact: true }).click();
     await page.locator('#paymentRows tr').first().getByRole('button').click(); await page.locator('#receiptForm [name=amount]').fill('0'); await click('Save payment'); await click('Clear payment');
     await hidden(page.locator('#receiptModal')); assert.ok((await page.locator('#paymentRows tr').first().textContent()).includes('Overdue')); await page.locator('#paymentsModal .close[data-close]').click();
-    await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).click(); await click('Remove'); await click('Save changes');
+    await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).click(); await click('Remove'); await click('Save changes'); await hidden(page.locator('#loanModal'));
     await click('Documents'); await visible(page.getByText('No documents saved. Add them when creating or editing a borrower.')); await page.locator('#utilityModal .close[data-close]').click();
     await click('Settings & backup'); await page.locator('#restoreInput').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{"version":3,"loans":[{}]}') });
     await visible(page.locator('#toast')); await page.locator('#utilityModal .close[data-close]').click();
-    await page.evaluate(() => localStorage.setItem('lendwisePortfolioV3', '{broken')); await page.reload(); await visible(page.locator('#storageError'));
-    await click('Settings & backup'); await download(() => click('Download backup'), 'recovery.json'); await page.locator('#utilityModal .close[data-close]').click();
-    await page.evaluate(data => localStorage.setItem('lendwisePortfolioV3', JSON.stringify(data)), payload); await page.reload();
+    // Custom monthly repayment is independent of the principal and uses no APR.
+    await page.locator('#searchInput').fill(''); await page.locator('#addBorrower').click();
+    for (const [key, value] of Object.entries({ name: 'Custom monthly borrower', phone: '+86 123456789', amount: '1000', months: '3', firstDue })) await fields.locator(`[name="${key}"]`).fill(value);
+    await fields.locator('[name=repaymentMode]').selectOption('custom'); await fields.locator('[name=payment]').fill('250');
+    assert.equal(await fields.locator('[name=rate]').isDisabled(), true);
+    assert.ok((await page.locator('#scheduleTotalPreview').textContent()).includes('750'));
+    await click('Save borrower & loan'); await hidden(page.locator('#loanModal'));
+    await page.locator('#searchInput').fill('Custom monthly borrower');
+    await page.locator('#borrowerRows').getByRole('button', { name: 'Payments', exact: true }).click();
+    assert.equal(await page.locator('#paymentRows tr').count(), 3);
+    for (let i = 0; i < 3; i++) assert.ok((await page.locator('#paymentRows tr').nth(i).locator('td').nth(2).textContent()).includes('250'));
+    await page.locator('#paymentsModal .close[data-close]').click();
+    await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).click();
+    assert.equal(await fields.locator('[name=repaymentMode]').inputValue(), 'custom');
+    await fields.locator('[name=payment]').fill('275'); await click('Save changes'); await hidden(page.locator('#loanModal'));
+    await page.reload(); await unlock();
+    await page.locator('#searchInput').fill('Custom monthly borrower'); assert.ok((await page.locator('#borrowerRows').textContent()).includes('275'));
+    // Sign-out clears rendered borrower details. Password changes preserve data.
+    await click('Sign out & lock'); await hidden(page.locator('#appShell'));
+    assert.equal((await page.locator('body').textContent()).includes('Custom monthly borrower'), false);
+    await unlock(); await click('Settings & backup'); await click('Change password');
+    await page.locator('#passwordForm [name=password]').fill(testPassword);
+    await page.locator('#passwordForm [name=newPassword]').fill('New synthetic password 2026');
+    await page.locator('#passwordForm [name=confirmPassword]').fill('New synthetic password 2026');
+    await page.locator('#passwordForm').getByRole('button', { name: 'Continue' }).click();
+    await visible(page.getByText('Password changed. Download a new encrypted backup. Older backups still use the old password.', { exact: true }));
+    await page.locator('#utilityModal .close[data-close]').click(); await click('Sign out & lock');
+    await page.locator('#authForm [name=password]').fill(testPassword); await page.locator('#authSubmit').click(); await visible(page.locator('#authError')); await hidden(page.locator('#appShell'));
+    await unlock('New synthetic password 2026');
+    // A different browser starts empty; encrypted backup + original password transfers the profile.
+    const otherContext = await browser.newContext(); const otherPage = await otherContext.newPage(); await otherPage.goto(url);
+    await visible(otherPage.getByRole('heading', { name: 'Create your local profile' }));
+    await otherPage.locator('details').evaluate(element => element.open = true);
+    await otherPage.locator('#authRestore').setInputFiles(backupPath);
+    await otherPage.locator('#passwordForm [name=password]').fill(testPassword); await otherPage.locator('#passwordForm').getByRole('button', { name: 'Continue' }).click();
+    await otherPage.getByRole('button', { name: 'Restore profile', exact: true }).click();
+    await visible(otherPage.locator('#appShell')); await otherPage.locator('#currencySelect').selectOption('INR');
+    await visible(otherPage.locator('#borrowerRows').getByText(name, { exact: true })); await otherContext.close();
+    // Corrupt vault is never replaced by an empty portfolio, and raw recovery still downloads.
+    await page.evaluate(() => localStorage.setItem('lendwiseVaultV1', '{broken')); await page.reload();
+    await page.locator('#authForm [name=password]').fill(testPassword); await page.locator('#authSubmit').click(); await visible(page.locator('#authError'));
+    await page.locator('details').evaluate(element => element.open = true);
+    await download(() => click('Download encrypted recovery copy'), 'recovery.json');
+    assert.equal(await fs.readFile(path.join(out, 'recovery.json'), 'utf8'), '{broken');
+    await injectPortfolio(payload);
     await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); }; });
     await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).first().click(); await click('Save changes'); await visible(page.locator('#loanError')); assert.ok((await page.locator('#loanError').textContent()).includes('Unable to save'));
     assert.deepEqual(errors, []);
-    console.log('PASS: borrower CRUD, receipts, currency integrity, all navigation, close/cancel, search/filter/sort/pages, documents, CSV/XLSX downloads, backup/restore, corruption/quota handling, mobile layout, no browser errors.');
+    assert.deepEqual(remoteRequests, []);
+    // Old plaintext data remains intact after a failed migration, then moves into the encrypted vault.
+    const migrationContext = await browser.newContext(), migrating = await migrationContext.newPage();
+    migrating.on('pageerror', error => errors.push(error.message)); await migrating.clock.install({ time: new Date() }); await migrating.goto(url);
+    const oldData = JSON.stringify(payload), oldLegacy = JSON.stringify([{ retained: 'old raw recovery copy' }]);
+    await migrating.evaluate(([current, old]) => { localStorage.setItem('lendwisePortfolioV3', current); localStorage.setItem('lendwiseBorrowers', old); }, [oldData, oldLegacy]);
+    await migrating.reload(); await visible(migrating.locator('#migrationNotice'));
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwisePortfolioV3')), oldData);
+    const createMigrated = async () => {
+      await migrating.locator('#authForm [name=profileName]').fill('Migrated profile');
+      await migrating.locator('#authForm [name=password]').fill(testPassword); await migrating.locator('#authForm [name=confirmPassword]').fill(testPassword);
+      await migrating.locator('#localConsentField input').check(); await migrating.locator('#authSubmit').click();
+    };
+    await migrating.evaluate(() => { window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key === 'lendwiseVaultV1') throw new DOMException('Quota', 'QuotaExceededError'); window.originalSetItem.call(this, key, value); }; });
+    await createMigrated(); await visible(migrating.locator('#authError'));
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwisePortfolioV3')), oldData);
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), null);
+    await migrating.evaluate(() => { Storage.prototype.setItem = window.originalSetItem; });
+    await createMigrated(); await visible(migrating.locator('#appShell'));
+    assert.deepEqual(await migrating.evaluate(() => ['lendwisePortfolioV3', 'lendwiseBorrowers'].map(key => localStorage.getItem(key))), [null, null]);
+    const migratedVault = await V.unlock(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), testPassword);
+    assert.equal(migratedVault.payload.portfolio.loans.length, payload.loans.length);
+    assert.equal(migratedVault.payload.legacyRecovery.lendwisePortfolioV3, oldData);
+    assert.equal(migratedVault.payload.legacyRecovery.lendwiseBorrowers, oldLegacy);
+    // A write in a second tab invalidates the first unlocked view, not just its next save.
+    const secondTab = await migrationContext.newPage(); await secondTab.goto(url);
+    await secondTab.locator('#authForm [name=password]').fill(testPassword); await secondTab.locator('#authSubmit').click(); await visible(secondTab.locator('#appShell'));
+    await migrating.locator('#currencySelect').selectOption('INR');
+    await migrating.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).first().click();
+    await migrating.locator('#loanForm [name=name]').fill('Changed from another tab'); await migrating.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await hidden(migrating.locator('#loanModal')); await hidden(secondTab.locator('#appShell'));
+    assert.ok((await secondTab.locator('#authError').textContent()).includes('another tab'));
+    await secondTab.close();
+    // Idle lock scrubs the visible data, closes dialogs and keeps ciphertext intact.
+    const beforeIdle = await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1'));
+    await migrating.clock.fastForward(301000);
+    await hidden(migrating.locator('#appShell'));
+    assert.equal((await migrating.locator('body').textContent()).includes('Changed from another tab'), false);
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeIdle);
+    await migrating.setViewportSize({ width: 390, height: 844 });
+    await migrating.screenshot({ path: path.join(out, 'local-profile-mobile.png'), fullPage: true });
+    assert.ok(await migrating.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await migrationContext.close(); assert.deepEqual(errors, []);
+    console.log('PASS: local profiles, encryption, wrong-password rejection, lock/reload, password change, cross-device encrypted restore, custom dues, borrower CRUD, receipts, currency integrity, all navigation, close/cancel, search/filter/sort/pages, documents, CSV/XLSX, corruption/quota handling, mobile layout, no browser errors or off-origin requests.');
   } finally { await browser.close(); server.close(); }
 }
 main().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

@@ -2,10 +2,9 @@
 const C = LoanCore;
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-const STORE = 'lendwisePortfolioV3';
 const pageSize = 8;
 let loans = [], page = 0, editingId = null, paymentLoanId = null, receiptNumber = null;
-let documentsDraft = [], deletedLoan = null, storageSnapshot = null, storageBlocked = false, toastTimer;
+let documentsDraft = [], deletedLoan = null, toastTimer, appEpoch = 0;
 let currency = 'USD', remindersEnabled = true;
 const optionMarkup = Object.entries(C.currencies).map(([code, label]) => `<option value="${code}">${code} — ${label}</option>`).join('');
 $('#currencySelect').innerHTML = optionMarkup;
@@ -33,26 +32,15 @@ try {
   const preferred = localStorage.getItem('lendwiseCurrency');
   if (Object.hasOwn(C.currencies, preferred)) currency = preferred;
   remindersEnabled = localStorage.getItem('lendwiseReminders') !== 'off';
-  storageSnapshot = localStorage.getItem(STORE);
-  if (storageSnapshot !== null) {
-    const saved = JSON.parse(storageSnapshot);
-    if (saved.version !== 3) throw new Error('Unsupported portfolio version.');
-    loans = validateCollection(saved.loans);
-  } else {
-    loans = validateCollection(JSON.parse(localStorage.getItem('lendwiseBorrowers') || '[]'));
-  }
-} catch (error) {
-  storageBlocked = true;
-  showError('#storageError', `Saved data could not be loaded: ${error.message} Nothing has been overwritten. Use Settings & backup to download it before restoring a valid backup.`);
-}
+} catch { /* Profile screen explains disabled storage before use. */ }
 $('#currencySelect').value = currency;
-function persist(next, restoring = false) {
-  if (storageBlocked && !restoring) throw new Error('Resolve the saved-data issue in Settings & backup before making changes.');
-  if (localStorage.getItem(STORE) !== storageSnapshot) throw new Error('This portfolio changed in another tab. Reload before saving.');
-  const text = JSON.stringify({ version: 3, loans: next });
-  try { localStorage.setItem(STORE, text); }
-  catch { throw new Error('Unable to save on this device. Storage may be full or disabled. Download a backup and reduce attached documents.'); }
-  storageSnapshot = text; loans = next; storageBlocked = false; showError('#storageError', '');
+function requireSession(generation = appEpoch) {
+  if (!LoanAccount.isUnlocked() || generation !== appEpoch) throw new Error('Your profile locked. Unlock it and retry your changes.');
+}
+async function persist(next, generation = appEpoch) {
+  requireSession(generation);
+  await LoanAccount.save(next);
+  requireSession(generation); loans = next; showError('#storageError', '');
   render();
 }
 function chosenLoans() { return loans.filter(loan => loan.currency === currency); }
@@ -74,7 +62,7 @@ function render() {
   $('#currentDate').textContent = new Date().toLocaleDateString(navigator.language, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   $('#currencyNote').textContent = `Showing ${currency} loans (${selected.length} of ${loans.length}). Each loan keeps its own currency.`;
   $('#totalOutstanding').textContent = money(sum(all, 'remaining'));
-  $('#activeCount').textContent = `${selected.filter(loan => loanState(loan).remaining > 0).length} active loans · includes scheduled interest`;
+  $('#activeCount').textContent = `${selected.filter(loan => loanState(loan).remaining > 0).length} active loans · scheduled amounts`;
   $('#collectedTotal').textContent = money(sum(all.filter(row => row.paidDate.startsWith(today.slice(0, 7))), 'paid'));
   $('#upcomingTotal').textContent = money(sum(upcoming, 'remaining'));
   $('#upcomingCount').textContent = `${upcoming.length} installments`;
@@ -116,13 +104,22 @@ const form = $('#loanForm');
 function formLoan() {
   const old = loans.find(loan => loan.id === editingId);
   const value = name => form.elements.namedItem(name).value;
-  const rate = value('rate') === '' && old?.rate === null ? null : Number(value('rate'));
-  return { ...(old || {}), id: old?.id || crypto.randomUUID(), name: value('name').trim(), phone: value('phone').trim(), currency: value('currency'), amount: Number(value('amount')), months: Number(value('months')), rate, firstDue: value('firstDue'), address: value('address').trim(), referrer: value('referrer').trim(), family: value('family').trim(), payments: old?.payments || {}, documents: documentsDraft };
+  const repaymentMode = value('repaymentMode');
+  const rate = repaymentMode === 'custom' ? null : Number(value('rate'));
+  const payment = repaymentMode === 'custom' ? Number(value('payment')) : null;
+  return { ...(old || {}), id: old?.id || crypto.randomUUID(), name: value('name').trim(), phone: value('phone').trim(), currency: value('currency'), amount: Number(value('amount')), months: Number(value('months')), repaymentMode, payment, rate, firstDue: value('firstDue'), address: value('address').trim(), referrer: value('referrer').trim(), family: value('family').trim(), payments: old?.payments || {}, documents: documentsDraft };
 }
 function previewPayment() {
+  const custom = form.elements.repaymentMode.value === 'custom';
+  $('#interestField').hidden = custom; form.elements.rate.disabled = custom; form.elements.rate.required = !custom;
+  $('#customPaymentField').hidden = !custom; form.elements.payment.disabled = !custom; form.elements.payment.required = custom;
   const loan = formLoan();
-  const value = loan.rate === null ? loan.payment : C.payment(loan.amount, loan.months, loan.rate);
+  const value = custom ? loan.payment : C.payment(loan.amount, loan.months, loan.rate);
   $('#paymentPreview').textContent = Number.isFinite(value) && value >= 0 ? money(value, loan.currency) : '—';
+  const validTerms = Number.isInteger(loan.months) && loan.months >= 1 && loan.months <= 600 && loan.amount > 0 && Number.isFinite(value) && value >= 0;
+  const total = validTerms ? C.round(C.schedule(loan).reduce((sum, row) => sum + row.dueAmount, 0)) : null;
+  $('#scheduleTotalPreview').textContent = total === null ? '—' : money(total, loan.currency);
+  $('#repaymentHint').textContent = custom ? `Your entered amount is due every month for the selected term, including the final month. No interest rate is used.${total !== null ? ` Loan amount: ${money(loan.amount, loan.currency)}. The scheduled total is ${money(Math.abs(C.round(total - loan.amount)), loan.currency)} ${total >= loan.amount ? 'above' : 'below'} the loan amount.` : ''}` : 'Monthly reducing-balance calculation. The final installment may differ slightly because of rounding.';
 }
 function renderDraftDocuments() { $('#existingDocuments').innerHTML = documentsDraft.map((doc, i) => `<div class="document-row"><span>${esc(doc.name)}</span><button type="button" class="text-btn danger-text" data-remove-doc="${i}">Remove</button></div>`).join(''); }
 function openLoan(id = null) {
@@ -131,10 +128,9 @@ function openLoan(id = null) {
   $('#loanTitle').textContent = loan ? 'Edit borrower & loan' : 'Add a new borrower';
   $('#saveLoan').textContent = loan ? 'Save changes' : 'Save borrower & loan';
   $('#editTermsNote').hidden = !loan;
-  form.elements.rate.required = loan?.rate !== null;
-  $('#legacyNote').hidden = loan?.rate !== null;
-  $('#legacyNote').textContent = 'This older loan has no saved interest rate. Its original amounts and monthly installment are preserved. Verify the currency and first payment date. Leave interest blank to keep its saved installment, or enter the original rate to rebuild the schedule.';
-  for (const name of ['name', 'phone', 'currency', 'amount', 'months', 'rate', 'firstDue', 'address', 'referrer', 'family']) form.elements.namedItem(name).value = loan?.[name] ?? (name === 'currency' ? currency : name === 'rate' ? (loan ? '' : 0) : name === 'months' ? 12 : '');
+  $('#legacyNote').hidden = true;
+  form.elements.repaymentMode.value = loan ? C.repaymentMode(loan) : 'interest';
+  for (const name of ['name', 'phone', 'currency', 'amount', 'months', 'rate', 'payment', 'firstDue', 'address', 'referrer', 'family']) form.elements.namedItem(name).value = loan?.[name] ?? (name === 'currency' ? currency : name === 'rate' ? 0 : name === 'months' ? 12 : '');
   documentsDraft = structuredClone(loan?.documents || []); renderDraftDocuments(); previewPayment();
   $('#loanModal').showModal();
 }
@@ -145,6 +141,7 @@ async function confirmAction(title, message, label = 'Confirm') {
 function readFile(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ id: crypto.randomUUID(), name: file.name, data: reader.result }); reader.onerror = () => reject(new Error('Unable to read document.')); reader.readAsDataURL(file); }); }
 form.addEventListener('submit', async event => {
   event.preventDefault(); if (!form.reportValidity()) return;
+  const generation = appEpoch;
   $('#saveLoan').disabled = true; showError('#loanError', '');
   try {
     const files = [...form.elements.documents.files];
@@ -152,13 +149,12 @@ form.addEventListener('submit', async event => {
     const loan = formLoan(), old = loans.find(item => item.id === editingId);
     loan.documents = [...documentsDraft, ...await Promise.all(files.map(readFile))];
     validateDocuments(loan.documents); C.validateLoan(loan);
-    const changed = old && ['amount', 'months', 'rate', 'firstDue', 'currency'].some(key => old[key] !== loan[key]);
-    if (changed && old.rate === null && loan.rate === null && (old.amount !== loan.amount || old.months !== loan.months)) throw new Error('Enter the original annual interest rate before changing this older loan’s amount or term.');
+    const changed = old && (C.repaymentMode(old) !== loan.repaymentMode || ['amount', 'months', 'firstDue', 'currency'].some(key => old[key] !== loan[key]) || (loan.repaymentMode === 'custom' ? old.payment !== loan.payment : old.rate !== loan.rate));
     if (changed && Object.keys(old.payments).length) {
       if (old.currency !== loan.currency) throw new Error('Clear recorded payments before changing the loan currency.');
       if (!await confirmAction('Rebuild repayment schedule?', 'Recorded payment totals stay with the same installment numbers. The due dates and scheduled amounts will use these new terms.', 'Rebuild & save')) return;
     }
-    persist(old ? loans.map(item => item.id === old.id ? loan : item) : [loan, ...loans]);
+    await persist(old ? loans.map(item => item.id === old.id ? loan : item) : [loan, ...loans], generation);
     if (currency !== loan.currency) setCurrency(loan.currency);
     $('#loanModal').close(); toast(old ? 'Borrower and loan updated.' : 'Borrower and loan saved.');
   } catch (error) { showError('#loanError', error.message); }
@@ -186,6 +182,7 @@ function openReceipt(id, number) {
 }
 $('#receiptForm').addEventListener('submit', async event => {
   event.preventDefault(); const receiptForm = event.currentTarget;
+  const generation = appEpoch;
   if (!receiptForm.reportValidity()) return;
   const submit = receiptForm.querySelector('[type=submit]'); submit.disabled = true;
   try {
@@ -194,15 +191,16 @@ $('#receiptForm').addEventListener('submit', async event => {
     if (!amount && loan.payments[receiptNumber] && !await confirmAction('Clear recorded payment?', `Remove the received total for ${loan.name}, month ${receiptNumber}? The installment will become unpaid.`, 'Clear payment')) return;
     const updated = structuredClone(loan);
     if (amount) updated.payments[receiptNumber] = { amount, date }; else delete updated.payments[receiptNumber];
-    C.validateLoan(updated); persist(loans.map(item => item.id === loan.id ? updated : item));
+    C.validateLoan(updated); await persist(loans.map(item => item.id === loan.id ? updated : item), generation);
     renderPayments(); $('#receiptModal').close(); toast('Payment record saved.');
   } catch (error) { showError('#receiptError', error.message); }
   finally { submit.disabled = false; }
 });
 async function deleteLoan(id) {
+  const generation = appEpoch;
   const loan = loans.find(item => item.id === id);
   if (!await confirmAction('Delete borrower & loan?', `Delete ${loan.name}, their loan, payment records and attached documents from this device? You can undo the last deletion in Settings until this page is reloaded.`, 'Delete borrower')) return;
-  persist(loans.filter(item => item.id !== id)); deletedLoan = loan; toast('Borrower deleted. Undo is available in Settings.');
+  await persist(loans.filter(item => item.id !== id), generation); deletedLoan = loan; toast('Borrower deleted. Undo is available in Settings.');
 }
 function download(data, name, type) {
   const url = URL.createObjectURL(new Blob([data], { type })), link = document.createElement('a');
@@ -218,23 +216,23 @@ function utility(kind) {
   if (kind === 'repayments') { openPayments(); return; }
   $('#utilityTitle').textContent = titles[kind];
   const container = $('#utilityContent');
-  if (kind === 'reports') container.innerHTML = '<p>Export all borrowers and every scheduled monthly installment, across all currencies.</p><p class="hint">Includes contact details, loan terms, due dates, received amounts and dates, balances, status and days late. CSV stores status text; Excel highlights overdue and paid-late rows in red. Status is a snapshot at export time.</p><div class="button-row"><button class="secondary" data-export="csv">Download detailed CSV</button><button class="primary" data-export="xlsx">Download Excel (.xlsx)</button></div>';
+  if (kind === 'reports') container.innerHTML = '<p>Export all borrowers and every scheduled monthly installment, across all currencies.</p><p class="hint">Includes contact details, loan terms, due dates, received amounts and dates, balances, status and days late. CSV stores status text; Excel highlights overdue and paid-late rows in red. Status is a snapshot at export time.</p><p class="notice">CSV, Excel and downloaded documents are not password-protected. Anyone with those files can read them. Store and share them carefully.</p><div class="button-row"><button class="secondary" data-export="csv">Download detailed CSV</button><button class="primary" data-export="xlsx">Download Excel (.xlsx)</button></div>';
   if (kind === 'documents') container.innerHTML = loans.flatMap(loan => loan.documents.map((doc, i) => `<div class="document-row"><div><strong>${esc(loan.name)}</strong><small class="block">${esc(doc.name)}</small></div>${actionButton('document', loan.id, 'Download', `data-index="${i}"`)}</div>`)).join('') || '<p class="empty">No documents saved. Add them when creating or editing a borrower.</p>';
   if (kind === 'reminders') {
     const due = entries().filter(row => row.remaining > 0 && C.daysBetween(C.today(), row.due) <= 7).sort((a, b) => a.due.localeCompare(b.due));
     container.innerHTML = `<p>Overdue and upcoming ${currency} installments. These reminders appear inside the app.</p><label class="check-label"><input type="checkbox" id="remindersToggle" ${remindersEnabled ? 'checked' : ''}> Show a reminder when I open the app</label>` + (due.map(row => `<div class="document-row"><div><strong>${esc(row.loan.name)}</strong><small class="block">Month ${row.number} · ${dateText(row.due)} · ${money(row.remaining)}</small>${statusBadge(row.status)}</div>${actionButton('payments', row.loan.id, 'Payments')}</div>`).join('') || '<p class="empty">No payments need attention.</p>');
   }
-  if (kind === 'settings') container.innerHTML = `<p>Loans and documents are stored in this browser on this device. Use a backup to move your portfolio to your phone.</p><label class="setting-label">Portfolio currency<select id="settingsCurrency">${optionMarkup}</select></label><p class="hint">This filters totals and sets the default for new loans. Existing loan amounts keep their own currency.</p><div class="button-row"><button class="primary" id="backupBtn">Download backup</button>${deletedLoan ? '<button class="secondary" id="undoDelete">Undo last deletion</button>' : ''}</div><label class="setting-label">Restore a Lendwise JSON backup<input id="restoreInput" type="file" accept="application/json,.json"></label><p class="hint">Restoring replaces this device’s current portfolio after confirmation. Export a backup first.</p>`;
+  if (kind === 'settings') container.innerHTML = `<p>Your profile, loans and documents are encrypted in this browser on this device. There is no shared database, automatic backup, sync or email password reset. Your session locks after five minutes without activity and whenever this page reloads.</p><label class="setting-label">Portfolio currency<select id="settingsCurrency">${optionMarkup}</select></label><p class="hint">This filters totals and sets the default for new loans. Existing loan amounts keep their own currency.</p><div class="button-row"><button class="primary" id="backupBtn">Download encrypted backup</button><button class="secondary" id="changePasswordBtn">Change password</button>${deletedLoan ? '<button class="secondary" id="undoDelete">Undo last deletion</button>' : ''}</div><label class="setting-label">Restore a Lendwise JSON backup<input id="restoreInput" type="file" accept="application/json,.json"></label><p class="hint">Restoring replaces this profile’s portfolio after confirmation, keeping this profile’s name and password. Encrypted backups require their original password. Older unencrypted version 3 backups are also supported. To move the whole profile to a new device, use Restore on its login screen.</p><p class="notice">Keep your password and backups safe. Clearing site data or uninstalling the browser may delete your records. Encryption protects saved data while locked; it cannot protect an unlocked session from malicious scripts, extensions or someone using your device. CSV, Excel and document downloads are not encrypted.</p>`;
   if (kind === 'settings') $('#settingsCurrency').value = currency;
   if (!$('#utilityModal').open) $('#utilityModal').showModal();
 }
 async function exportReport(type, button) {
-  if (storageBlocked) throw new Error('Saved data could not be loaded. Download the raw backup in Settings first.');
+  const generation = appEpoch; requireSession(generation);
   if (!loans.length) { toast('Add a borrower before exporting.'); return; }
   const original = button.textContent; button.disabled = true; button.textContent = 'Preparing…';
   try {
     if (type === 'csv') download(C.csv(loans), `lendwise-payments-${C.today()}.csv`, 'text/csv;charset=utf-8');
-    else { const ExcelJS = await LoanExport.loadExcel(); const book = await LoanExport.workbook(loans, C.today(), ExcelJS, C); download(await book.xlsx.writeBuffer(), `lendwise-payments-${C.today()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); }
+    else { const ExcelJS = await LoanExport.loadExcel(); requireSession(generation); const book = await LoanExport.workbook(loans, C.today(), ExcelJS, C); const buffer = await book.xlsx.writeBuffer(); requireSession(generation); download(buffer, `lendwise-payments-${C.today()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); }
     toast('Report downloaded.');
   } finally { button.disabled = false; button.textContent = original; }
 }
@@ -258,10 +256,10 @@ document.addEventListener('click', async event => {
     if (button.dataset.action === 'receipt') openReceipt(id, Number(button.dataset.number));
     if (button.dataset.action === 'document') downloadDocument(id, Number(button.dataset.index));
     if (button.id === 'backupBtn') {
-      const backup = storageBlocked ? { recovery: true, portfolio: localStorage.getItem(STORE), legacy: localStorage.getItem('lendwiseBorrowers') } : { version: 3, loans };
-      download(JSON.stringify(backup, null, 2), `lendwise-backup-${C.today()}.json`, 'application/json'); toast('Backup downloaded.');
+      download(LoanAccount.backup(), `lendwise-encrypted-backup-${C.today()}.json`, 'application/json'); toast('Encrypted backup downloaded. Keep its password safe.');
     }
-    if (button.id === 'undoDelete' && deletedLoan) { persist([deletedLoan, ...loans]); deletedLoan = null; utility('settings'); toast('Last deleted borrower restored.'); }
+    if (button.id === 'changePasswordBtn') await LoanAccount.changePassword();
+    if (button.id === 'undoDelete' && deletedLoan) { await persist([deletedLoan, ...loans]); deletedLoan = null; utility('settings'); toast('Last deleted borrower restored.'); }
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('change', async event => {
@@ -270,11 +268,14 @@ document.addEventListener('change', async event => {
     if (input.id === 'settingsCurrency') setCurrency(input.value);
     if (input.id === 'remindersToggle') { localStorage.setItem('lendwiseReminders', input.checked ? 'on' : 'off'); remindersEnabled = input.checked; }
     if (input.id === 'restoreInput' && input.files[0]) {
-      if (input.files[0].size > 10 * 1024 * 1024) throw new Error('Backup is too large (maximum 10 MB).');
-      const data = JSON.parse(await input.files[0].text());
+      const generation = appEpoch;
+      if (input.files[0].size > 20 * 1024 * 1024) throw new Error('Backup is too large (maximum 20 MB).');
+      const data = await LoanAccount.decodeBackup(JSON.parse(await input.files[0].text()));
+      if (!data) { input.value = ''; return; }
+      requireSession(generation);
       if (data.version !== 3 || !Array.isArray(data.loans)) throw new Error('Choose a valid Lendwise version 3 backup.');
       const restored = validateCollection(data.loans);
-      if (await confirmAction('Replace this portfolio?', `Replace ${loans.length} current borrowers with ${restored.length} borrowers from this backup, including payment records and documents?`, 'Restore backup')) { persist(restored, true); deletedLoan = null; utility('settings'); toast('Backup restored.'); }
+      if (await confirmAction('Replace this portfolio?', `Replace ${loans.length} current borrowers with ${restored.length} borrowers from this backup, including payment records and documents?`, 'Restore backup')) { await persist(restored, generation); deletedLoan = null; utility('settings'); toast('Backup restored.'); }
       input.value = '';
     }
   } catch (error) { input.value = ''; toast(error.message); }
@@ -287,8 +288,18 @@ $('#currencySelect').onchange = event => setCurrency(event.target.value);
 $('#searchInput').oninput = () => { page = 0; renderRows(); };
 $('#statusFilter').onchange = $('#sortSelect').onchange = () => { page = 0; renderRows(); };
 $('#prevPage').onclick = () => { page--; renderRows(); }; $('#nextPage').onclick = () => { page++; renderRows(); };
-$('#chartPeriod').onchange = () => renderChart(entries()); form.addEventListener('input', previewPayment);
-window.addEventListener('storage', event => { if (event.key === STORE) showError('#storageError', 'This portfolio changed in another tab. Reload before editing to avoid overwriting those changes.'); });
-window.addEventListener('focus', () => { render(); if ($('#paymentsModal').open) renderPayments(); });
-render();
-if (remindersEnabled && entries().some(row => row.remaining > 0 && C.daysBetween(C.today(), row.due) <= 7)) toast('Payments need attention. Open Reminders to view them.');
+$('#chartPeriod').onchange = () => renderChart(entries()); form.addEventListener('input', previewPayment); form.elements.repaymentMode.addEventListener('change', previewPayment);
+window.addEventListener('focus', () => { if (LoanAccount.isUnlocked()) { render(); if ($('#paymentsModal').open) renderPayments(); } });
+LoanAccount.start({
+  validate: validateCollection, confirm: confirmAction, download, notice: toast,
+  unlock: items => {
+    appEpoch++; loans = items; page = 0; render();
+    if (remindersEnabled && entries().some(row => row.remaining > 0 && C.daysBetween(C.today(), row.due) <= 7)) toast('Payments need attention. Open Reminders to view them.');
+  },
+  lock: () => {
+    appEpoch++; loans = []; documentsDraft = []; deletedLoan = null; editingId = paymentLoanId = receiptNumber = null;
+    form.reset(); $('#receiptForm').reset(); $('#searchInput').value = ''; $('#profileLabel').textContent = '';
+    for (const id of ['paymentRows', 'paymentsTitle', 'receiptSummary', 'utilityContent', 'existingDocuments', 'confirmText', 'toastText', 'paymentPreview', 'scheduleTotalPreview', 'repaymentHint', 'loanError', 'receiptError']) $('#' + id).textContent = '';
+    $('#toast').classList.remove('show'); clearTimeout(toastTimer); render();
+  }
+});
