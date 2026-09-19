@@ -1,0 +1,67 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const C = require('../core.js');
+const loan = (overrides = {}) => ({ id: 'test-loan', name: 'Test borrower', phone: '+91 9000000000', amount: 1200, months: 12, rate: 0, firstDue: '2026-01-31', currency: 'INR', payments: {}, documents: [], ...overrides });
+test('monthly dates retain original day across leap years and year boundaries', () => {
+  assert.equal(C.monthDate('2024-01-31', 1), '2024-02-29');
+  assert.equal(C.monthDate('2024-01-31', 2), '2024-03-31');
+  assert.equal(C.monthDate('2026-12-31', 1), '2027-01-31');
+  assert.equal(C.parseDate('2026-02-30'), null);
+});
+test('zero-interest schedule reconciles cents and final principal balance', () => {
+  const rows = C.schedule(loan({ amount: 1000, months: 3 }));
+  assert.deepEqual(rows.map(r => r.dueAmount), [333.33, 333.33, 333.34]);
+  assert.equal(rows.at(-1).balance, 0);
+  assert.equal(C.round(rows.reduce((a, r) => a + r.principal, 0)), 1000);
+});
+test('interest schedule reconciles principal with no negative closing balance', () => {
+  assert.equal(C.payment(12000, 12, 12), 1066.19);
+  const rows = C.schedule(loan({ amount: 12000, rate: 12 }));
+  assert.equal(rows[0].interest, 120);
+  assert.equal(C.round(rows.reduce((a, r) => a + r.principal, 0)), 12000);
+  assert.equal(rows.at(-1).balance, 0);
+});
+test('partial, overdue, due-today, upcoming, and paid-late states use dates and receipts', () => {
+  const rows = C.schedule(loan({ firstDue: '2026-06-01', payments: { 1: { amount: 100, date: '2026-06-05' }, 2: { amount: 25, date: '2026-07-01' } } }), '2026-09-01');
+  assert.equal(rows[0].status, 'Paid late'); assert.equal(rows[0].lateDays, 4);
+  assert.equal(rows[1].status, 'Overdue (partial)'); assert.equal(rows[1].remaining, 75);
+  assert.equal(rows[2].status, 'Overdue');
+  assert.equal(rows[3].status, 'Due today'); assert.equal(rows[3].delayed, false);
+  assert.equal(rows[4].status, 'Upcoming');
+});
+test('earlier data retains stored amounts, installment and contact details without invented rates', () => {
+  const [saved] = C.migrate([{ name: 'Existing', phone: '+86 123', amount: 1234, months: 12, payment: 111, due: 'Sep 21, 2026', address: 'Existing address' }]);
+  assert.equal(saved.amount, 1234); assert.equal(saved.currency, 'USD'); assert.equal(saved.rate, null);
+  assert.equal(saved.firstDue, '2026-09-21'); assert.equal(C.schedule(saved)[0].dueAmount, 111);
+  assert.equal(C.schedule(saved)[0].interest, null);
+});
+test('invalid terms or edits that erase/overpay existing installments are rejected', () => {
+  assert.throws(() => C.validateLoan(loan({ months: 0 })));
+  assert.throws(() => C.validateLoan(loan({ months: 1.5 })));
+  assert.throws(() => C.validateLoan(loan({ amount: NaN })));
+  assert.throws(() => C.validateLoan(loan({ rate: -1 })));
+  assert.throws(() => C.validateLoan(loan({ firstDue: '2026-02-30' })));
+  assert.throws(() => C.validateLoan(loan({ payments: { 13: { amount: 100, date: '2026-06-01' } } })));
+  assert.throws(() => C.validateLoan(loan({ payments: { 1: { amount: 101, date: '2026-06-01' } } })));
+});
+test('CSV includes all months and currencies, quotes multiline text and neutralizes formula injection', () => {
+  const input = [loan({ name: '=HYPERLINK("bad")', address: 'Line 1,\nLine 2' }), loan({ id: 'other', currency: 'CNY' })];
+  const rows = C.exportRows(input, '2026-06-01');
+  assert.equal(rows.length, 24); assert.equal(rows[12][6], 'CNY');
+  const csv = C.csv(input, '2026-06-01');
+  assert.ok(csv.startsWith('\uFEFF')); assert.ok(csv.includes('"\'=HYPERLINK(""bad"")"'));
+  assert.ok(csv.includes('"\'+91 9000000000"')); assert.ok(csv.includes('"Line 1,\nLine 2"'));
+  assert.ok(csv.includes('Days late')); assert.ok(csv.includes('Overdue'));
+});
+test('XLSX round-trip retains numeric amounts, dates, filters and red delayed rows', async () => {
+  const Excel = require('../vendor/exceljs.min.js');
+  const { workbook } = require('../export.js');
+  const book = await workbook([loan({ name: '李 "Test"', months: 3, firstDue: '2026-01-01' })], '2026-02-01', Excel, C);
+  const buffer = await book.xlsx.writeBuffer();
+  const reopened = new Excel.Workbook(); await reopened.xlsx.load(buffer);
+  const sheet = reopened.getWorksheet('Monthly payments');
+  assert.equal(sheet.rowCount, 4); assert.equal(sheet.getCell('B2').value, '李 "Test"');
+  assert.equal(typeof sheet.getCell('M2').value, 'number'); assert.ok(sheet.getCell('L2').value instanceof Date);
+  assert.equal(sheet.getCell('T2').value, 'Overdue'); assert.equal(sheet.getCell('T2').font.color.argb, 'FF9C1C20');
+  assert.notEqual(sheet.getCell('T3').font?.color?.argb, 'FF9C1C20'); assert.ok(sheet.autoFilter);
+});

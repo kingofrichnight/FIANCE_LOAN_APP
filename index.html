@@ -3,79 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#f8faf8">
+  <meta name="theme-color" content="#157347">
   <title>Lendwise — Loan Portfolio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
+  <script src="core.js?v=3" defer></script><script src="export.js?v=3" defer></script><script src="app.js?v=3" defer></script>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
-      <a class="brand" href="#"><span class="brand-mark">L</span><span>Lendwise</span></a>
+      <a class="brand" href="#overview"><span class="brand-mark">L</span>Lendwise</a>
       <nav aria-label="Main navigation">
-        <p class="nav-label">WORKSPACE</p>
-        <a class="nav-item active" href="#"><span>⌂</span>Overview</a>
-        <a class="nav-item" href="#borrowers"><span>♙</span>Borrowers <b>24</b></a>
-        <a class="nav-item" href="#"><span>▤</span>Repayments</a>
-        <a class="nav-item" href="#"><span>◷</span>Reminders <i>3</i></a>
-        <p class="nav-label">MANAGE</p>
-        <a class="nav-item" href="#"><span>▣</span>Documents</a>
-        <a class="nav-item" href="#"><span>↗</span>Reports</a>
-        <a class="nav-item" href="#"><span>⚙</span>Settings</a>
+        <p class="nav-label">WORKSPACE</p><a class="nav-item active" href="#overview">Overview</a><a class="nav-item" href="#borrowers">Borrowers <b id="navCount">0</b></a>
+        <button class="nav-item" data-open="repayments">Repayments</button><button class="nav-item" data-open="reminders">Reminders <i id="reminderCount">0</i></button>
+        <p class="nav-label">MANAGE</p><button class="nav-item" data-open="documents">Documents</button><button class="nav-item" data-open="reports">Reports</button><button class="nav-item" data-open="settings">Settings &amp; backup</button>
       </nav>
-      <div class="sidebar-card">
-        <span class="sparkle">✦</span>
-        <strong>Stay on top of every payment</strong>
-        <p>Enable reminders to get notified 7 days before.</p>
-        <button id="enableAlerts">Enable reminders</button>
-      </div>
-      <div class="account"><div class="avatar">JM</div><div><strong>James Morgan</strong><small>Portfolio manager</small></div><button>•••</button></div>
+      <div class="sidebar-card"><strong>Your portfolio, on this device</strong><p>Export a backup before switching phones or clearing browser data.</p><button data-open="settings">Manage backups</button></div>
     </aside>
-
     <main>
       <header>
-        <button class="menu-btn" id="menuBtn" aria-label="Toggle menu">☰</button>
-        <label class="search"><span>⌕</span><input id="searchInput" placeholder="Search borrowers, loans..." /></label>
-        <div class="header-actions"><select id="currencySelect" aria-label="Display currency"><option value="USD">USD ($)</option><option value="INR">INR (₹)</option><option value="CNY">CNY (¥)</option><option value="EUR">EUR (€)</option><option value="GBP">GBP (£)</option></select><button class="icon-btn" aria-label="Notifications">♢<span></span></button><button class="primary" id="newLoanTop">＋ New loan</button></div>
+        <button class="menu-btn" id="menuBtn" aria-label="Toggle menu" aria-expanded="false" aria-controls="sidebar">☰</button>
+        <label class="search"><span aria-hidden="true">⌕</span><input id="searchInput" aria-label="Search borrowers" placeholder="Search name or phone"></label>
+        <div class="header-actions"><select id="currencySelect" aria-label="Portfolio currency"></select><button class="icon-btn" id="notificationsBtn" aria-label="View reminders">♢</button><button class="primary" id="newLoanTop">＋ New loan</button></div>
       </header>
-
-      <div class="page">
-        <section class="hero-row">
-          <div><p class="eyebrow">SATURDAY, SEPTEMBER 19</p><h1>Good morning, James.</h1><p>Here’s what’s happening with your portfolio today.</p></div>
-          <div class="hero-actions"><button class="secondary" id="exportBtn">⇩ Export report</button><button class="primary" id="newLoanHero">＋ New loan</button></div>
+      <div class="page" id="overview">
+        <div id="storageError" class="notice error" role="alert" hidden></div>
+        <section class="hero-row"><div><p class="eyebrow" id="currentDate"></p><h1>Your loan portfolio</h1><p id="currencyNote"></p></div><div class="hero-actions"><button class="secondary" id="exportBtn">Export report</button><button class="primary" id="newLoanHero">＋ New loan</button></div></section>
+        <section class="metrics" aria-label="Portfolio totals">
+          <article><p>Remaining repayments</p><h2 id="totalOutstanding">0</h2><small id="activeCount">No active loans</small></article>
+          <article><p>Collected this month</p><h2 id="collectedTotal">0</h2><small>Based on recorded payment dates</small></article>
+          <article><p>Due in next 7 days</p><h2 id="upcomingTotal">0</h2><small id="upcomingCount"></small></article>
+          <article><p>Overdue amount</p><h2 id="overdueTotal">0</h2><small id="overdueCount"></small></article>
         </section>
-
-        <section class="metrics">
-          <article><div class="metric-head"><span class="metric-icon green">↗</span></div><p>Total outstanding</p><h2 id="totalOutstanding">$0</h2><small>Across 0 active loans</small></article>
-          <article><div class="metric-head"><span class="metric-icon blue">◎</span></div><p>Collected this month</p><h2>$0</h2><small>No repayments recorded</small></article>
-          <article><div class="metric-head"><span class="metric-icon amber">◷</span></div><p>Due in next 7 days</p><h2>$0</h2><small>From 0 repayments</small></article>
-          <article><div class="metric-head"><span class="metric-icon rose">!</span></div><p>Overdue amount</p><h2>$0</h2><small>Nothing overdue</small></article>
-        </section>
-
         <section class="dashboard-grid">
-          <article class="panel collection-card"><div class="panel-title"><div><h3>Collection overview</h3><p>Monthly expected vs collected</p></div><select><option>Last 6 months</option></select></div><div class="chart-wrap"><div class="y-axis"><span>$25k</span><span>$20k</span><span>$15k</span><span>$10k</span><span>$5k</span><span>$0</span></div><div class="chart" id="chart"></div></div><div class="legend"><span><i class="dot expected"></i>Expected</span><span><i class="dot collected"></i>Collected</span></div></article>
-          <article class="panel upcoming"><div class="panel-title"><div><h3>Upcoming repayments</h3><p>Next 7 days</p></div><a href="#">View all →</a></div><div id="upcomingList"></div></article>
+          <article class="panel collection-card"><div class="panel-title"><div><h3>Collection overview</h3><p>Scheduled vs received</p></div><label><span class="sr-only">Chart period</span><select id="chartPeriod"><option value="6">Last 6 months</option><option value="12">Last 12 months</option></select></label></div><div class="chart-wrap"><div class="y-axis" id="chartAxis"></div><div class="chart" id="chart" role="img" aria-label="Monthly collection chart"></div></div><div class="legend"><span><i class="dot expected"></i>Scheduled</span><span><i class="dot collected"></i>Received</span></div><p class="hint" id="chartEmpty"></p></article>
+          <article class="panel upcoming"><div class="panel-title"><div><h3>Payments needing attention</h3><p>Overdue and due in the next 7 days</p></div><button class="text-btn" data-open="repayments">View all</button></div><div id="upcomingList"></div></article>
         </section>
-
         <section class="panel borrowers" id="borrowers">
-          <div class="panel-title"><div><h3>Borrowers</h3><p>Manage your active loan accounts</p></div><div class="table-actions"><button>☷ Filter</button><button>↕ Sort</button><button class="primary" id="addBorrower">＋ Add borrower</button></div></div>
-          <div class="table-scroll"><table><thead><tr><th>BORROWER</th><th>LOAN AMOUNT</th><th>MONTHLY PAYMENT</th><th>NEXT DUE</th><th>PROGRESS</th><th>SCORE</th><th>STATUS</th><th></th></tr></thead><tbody id="borrowerRows"></tbody></table></div>
-          <div class="table-footer"><span id="tableCount">Showing 5 of 24 borrowers</span><div><button disabled>←</button><button>→</button></div></div>
+          <div class="panel-title"><div><h3>Borrowers</h3><p>Manage loan details and monthly payments</p></div><div class="table-actions"><label><span class="sr-only">Filter borrowers</span><select id="statusFilter"><option value="all">All statuses</option><option value="overdue">Overdue</option><option value="active">Active</option><option value="paid">Paid off</option></select></label><label><span class="sr-only">Sort borrowers</span><select id="sortSelect"><option value="newest">Newest first</option><option value="name">Name A–Z</option><option value="amount">Largest loan</option><option value="due">Next due date</option></select></label><button class="primary" id="addBorrower">＋ Add borrower</button></div></div>
+          <div class="table-scroll"><table><thead><tr><th>BORROWER</th><th>LOAN</th><th>MONTHLY PAYMENT</th><th>NEXT DUE</th><th>RECEIVED</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="borrowerRows"></tbody></table></div>
+          <div class="table-footer"><span id="tableCount"></span><div><button id="prevPage" aria-label="Previous page">←</button><button id="nextPage" aria-label="Next page">→</button></div></div>
         </section>
       </div>
     </main>
   </div>
-
-  <dialog id="loanModal"><form method="dialog" id="loanForm"><div class="modal-head"><div><h2>Add a new borrower</h2><p>Create their profile and repayment plan.</p></div><button class="close" value="cancel" aria-label="Close">×</button></div><div class="form-grid">
-    <label>Full name<input required name="name" placeholder="Full name"></label><label>Phone number<input required name="phone" placeholder="Country code and phone number"></label>
-    <label>Loan amount<input required min="1" type="number" name="amount" placeholder="10000"></label><label>Repayment term (months)<input required min="1" type="number" name="months" placeholder="12"></label>
-    <label>Annual interest rate (%)<input required min="0" step="0.1" type="number" name="rate" placeholder="8.5"></label><label>First payment date<input required type="date" name="due"></label>
-    <label class="full">Home address<input name="address" placeholder="Street, city, state"></label><label>Referrer<input name="referrer" placeholder="Name of referrer"></label><label>Family contact<input name="family" placeholder="Name and phone"></label>
-    <label class="full upload">Documents (PDF or images)<input type="file" name="documents" accept=".pdf,image/*" multiple><span>⌑ Choose borrower documents</span></label>
-  </div><div class="calculation"><span>Estimated monthly payment</span><strong id="paymentPreview">$0.00</strong></div><div class="modal-actions"><button value="cancel">Cancel</button><button class="primary" value="default" id="saveLoan">Save borrower & loan</button></div></form></dialog>
-  <div class="toast" id="toast"><span>✓</span><div><strong>Done</strong><small id="toastText">Your changes were saved.</small></div></div>
-  <script src="app.js"></script>
+  <dialog id="loanModal" aria-labelledby="loanTitle"><form id="loanForm">
+    <div class="modal-head"><div><h2 id="loanTitle">Add a new borrower</h2><p>Monthly reducing-balance repayment plan.</p></div><button type="button" class="close" data-close aria-label="Close">×</button></div>
+    <p id="legacyNote" class="notice" hidden></p><p id="loanError" class="notice error" role="alert" hidden></p>
+    <div class="form-grid">
+      <label>Full name<input required name="name" maxlength="120" autocomplete="name"></label><label>Phone number (with country code)<input required type="tel" name="phone" maxlength="40" autocomplete="tel"></label>
+      <label>Loan currency<select name="currency" required></select></label><label>Loan amount<input required min="0.01" max="1000000000000" step="0.01" type="number" name="amount" inputmode="decimal"></label>
+      <label>Repayment term (months)<input required min="1" max="600" step="1" type="number" name="months" inputmode="numeric"></label><label>Annual interest rate (%)<input min="0" max="100" step="0.01" type="number" name="rate" inputmode="decimal"></label>
+      <label>First payment date<input required type="date" name="firstDue" min="1900-01-01" max="2100-12-31"></label><label>Referrer<input name="referrer" maxlength="200"></label>
+      <label class="full">Home address<input name="address" maxlength="500" autocomplete="street-address"></label><label class="full">Family contact<input name="family" maxlength="200"></label>
+      <label class="full">Documents (PDF or images, max 1 MB each)<input type="file" name="documents" accept="application/pdf,image/png,image/jpeg,image/webp" multiple></label><div class="full" id="existingDocuments"></div>
+    </div><div class="calculation"><span>Monthly payment</span><strong id="paymentPreview">0.00</strong></div><p class="hint">Amounts use the loan’s currency. No exchange-rate conversion. The final installment may differ slightly because of rounding.</p><p class="hint" id="editTermsNote" hidden>Changing loan terms rebuilds the schedule. Recorded payments stay with their installment number; conflicting changes will be rejected.</p>
+    <div class="modal-actions"><button type="button" data-close>Cancel</button><button type="submit" class="primary" id="saveLoan">Save borrower &amp; loan</button></div>
+  </form></dialog>
+  <dialog id="paymentsModal" class="wide-dialog" aria-labelledby="paymentsTitle"><div class="dialog-body"><div class="modal-head"><div><h2 id="paymentsTitle">Monthly repayments</h2><p id="paymentsSubtitle"></p></div><button class="close" data-close aria-label="Close repayments">×</button></div><div class="table-scroll"><table><thead><tr><th>MONTH</th><th>DUE DATE</th><th>SCHEDULED</th><th>RECEIVED</th><th>REMAINING</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody id="paymentRows"></tbody></table></div><div class="modal-actions"><button data-close>Done</button></div></div></dialog>
+  <dialog id="receiptModal" aria-labelledby="receiptTitle"><form id="receiptForm"><div class="modal-head"><h2 id="receiptTitle">Record payment</h2><button class="close" type="button" data-close aria-label="Close payment">×</button></div><p id="receiptSummary"></p><p id="receiptError" class="notice error" role="alert" hidden></p><div class="form-grid"><label>Total received for this installment<input required type="number" name="amount" min="0" step="0.01" inputmode="decimal"></label><label>Last received date<input required type="date" name="date" min="1900-01-01"></label></div><p class="hint">Update the total received and its latest payment date. Set the amount to 0 to clear this record. One total and date are kept per installment.</p><div class="modal-actions"><button type="button" data-close>Cancel</button><button class="primary" type="submit">Save payment</button></div></form></dialog>
+  <dialog id="utilityModal" aria-labelledby="utilityTitle"><div class="dialog-body"><div class="modal-head"><h2 id="utilityTitle"></h2><button class="close" data-close aria-label="Close panel">×</button></div><div id="utilityContent"></div><div class="modal-actions"><button data-close>Done</button></div></div></dialog>
+  <dialog id="confirmModal" aria-labelledby="confirmTitle"><form method="dialog"><h2 id="confirmTitle">Confirm action</h2><p id="confirmText"></p><div class="modal-actions"><button value="cancel">Cancel</button><button class="danger" value="confirm" id="confirmAction">Confirm</button></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"><span aria-hidden="true">✓</span><div><strong>Portfolio update</strong><small id="toastText"></small></div></div>
+  <noscript>This app needs JavaScript enabled to manage loans.</noscript>
 </body>
 </html>
