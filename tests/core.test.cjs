@@ -83,6 +83,57 @@ test('amortization reconciles principal over 192 combinations of amount, rate an
     assert.ok(Math.abs(C.round(rows.reduce((sum, row) => sum + row.principal, 0)) - amount) < .01);
   }
 });
+test('repayment score has no history for future, due-today or zero-value installments', () => {
+  assert.equal(C.repaymentScore(loan(), '2026-01-01').score, null);
+  assert.equal(C.repaymentScore(loan({ payments: { 1: { amount: 100, date: '2026-01-01' } } }), '2026-01-31').score, null);
+  const tiny = C.repaymentScore(loan({ amount: .01, months: 12 }), '2026-03-01');
+  assert.equal(tiny.assessed, 0); assert.equal(tiny.score, null);
+  assert.throws(() => C.repaymentScore(loan(), 'not-a-date'));
+});
+
+test('repayment score explains on-time, late, partial and unrecorded months with equal weighting', () => {
+  const input = loan({ amount: 400, months: 4, firstDue: '2026-01-01', payments: { 1: { amount: 100, date: '2026-01-01' }, 2: { amount: 100, date: '2026-02-02' }, 3: { amount: 50, date: '2026-03-01' } } });
+  const result = C.repaymentScore(input, '2026-04-02');
+  assert.equal(result.score, 43); assert.equal(result.assessed, 4);
+  for (const key of ['onTime', 'paidLate', 'partialOverdue', 'unpaidOverdue']) assert.equal(result[key], 1);
+  assert.deepEqual(result.installments.map(item => item.points), [100, 50, 25, 0]);
+});
+
+test('repayment score reaches 100 only with all on-time months and respects receipt snapshot dates', () => {
+  const input = loan({ amount: 200, months: 2, firstDue: '2026-01-01', payments: { 1: { amount: 100, date: '2026-01-01' }, 2: { amount: 100, date: '2026-01-01' } } });
+  assert.equal(C.repaymentScore(input, '2026-02-02').score, 100);
+  input.payments[1].date = '2026-01-03';
+  assert.equal(C.repaymentScore(input, '2026-01-02').score, 0);
+  assert.equal(C.repaymentScore(input, '2026-01-03').score, 50);
+  assert.equal(C.repaymentScore(input, '2026-02-02').score, 75);
+});
+
+test('custom and interest plans score from payment proportions, not identity or denomination', () => {
+  const base = loan({ amount: 1200, months: 12, firstDue: '2026-01-01', payments: { 1: { amount: 30, date: '2026-01-02' } } });
+  assert.equal(C.repaymentScore(base, '2026-01-03').score, 15);
+  const custom = { ...base, name: 'Different name', phone: '+86 123', currency: 'CNY', amount: 9999, repaymentMode: 'custom', rate: null, payment: 250, payments: { 1: { amount: 75, date: '2026-01-02' } } };
+  assert.equal(C.repaymentScore(custom, '2026-01-03').score, 15);
+});
+
+test('editing or restoring receipts recomputes scores without storing or mutating a score', () => {
+  const input = loan({ amount: 100, months: 1, firstDue: '2026-01-01', payments: { 1: { amount: 20, date: '2026-01-02' } } });
+  const raw = JSON.stringify(input);
+  assert.equal(C.repaymentScore(input, '2026-02-01').score, 10); assert.equal(JSON.stringify(input), raw);
+  input.payments[1].amount = 100;
+  assert.equal(C.repaymentScore(input, '2026-02-01').score, 50);
+  input.payments[1].date = '2026-01-01';
+  assert.equal(C.repaymentScore(input, '2026-02-01').score, 100);
+  assert.equal(C.repaymentScore(C.migrate([JSON.parse(raw)])[0], '2026-02-01').score, 10);
+  delete input.payments[1]; assert.equal(C.repaymentScore(input, '2026-02-01').score, 0);
+});
+
+test('exports include the dated local score, history count and formula, with blank distinct from zero', () => {
+  assert.deepEqual(C.exportRows([loan()], '2026-01-01')[0].slice(23), [null, 0, 'local-v1']);
+  assert.deepEqual(C.exportRows([loan()], '2026-02-01')[0].slice(23), [0, 1, 'local-v1']);
+  assert.equal(C.headers.length, 26); assert.equal(C.exportRows([loan()])[0].length, 26);
+  assert.ok(C.csv([loan()]).includes('not credit score'));
+});
+
 test('CSV includes all months and currencies, quotes multiline text and neutralizes formula injection', () => {
   const input = [loan({ name: '=HYPERLINK("bad")', address: 'Line 1,\nLine 2' }), loan({ id: 'other', currency: 'CNY' })];
   const rows = C.exportRows(input, '2026-06-01');
@@ -103,4 +154,5 @@ test('XLSX round-trip retains numeric amounts, dates, filters and red delayed ro
   assert.equal(typeof sheet.getCell('M2').value, 'number'); assert.ok(sheet.getCell('L2').value instanceof Date);
   assert.equal(sheet.getCell('T2').value, 'Overdue'); assert.equal(sheet.getCell('T2').font.color.argb, 'FF9C1C20');
   assert.notEqual(sheet.getCell('T3').font?.color?.argb, 'FF9C1C20'); assert.ok(sheet.autoFilter);
+  assert.equal(sheet.getCell('X2').value, 0); assert.equal(sheet.getCell('Y2').value, 1); assert.equal(sheet.getCell('Z2').value, 'local-v1'); assert.ok(sheet.getCell('X1').note.includes('not a credit score'));
 });

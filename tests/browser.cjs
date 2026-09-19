@@ -90,6 +90,33 @@ async function main() {
     await page.locator('#paymentStatusFilter').selectOption('all');
     await page.screenshot({ path: path.join(out, 'repayments-desktop.png'), fullPage: true, animations: 'disabled' });
     await page.locator('#paymentsModal').getByRole('button', { name: 'Done', exact: true }).click();
+    // Score is inspectable, read-only, escaped, current, and fits the phone layout.
+    const expectedScore = C.repaymentScore({ amount: 1800, months: 3, rate: 0, firstDue, payments: { 1: { amount: 600, date: C.today() }, 2: { amount: 100, date: C.today() } } });
+    const beforeScore = await page.evaluate(() => localStorage.getItem('lendwiseVaultV1'));
+    await page.locator('#borrowerRows [data-action=score]').click(); await visible(page.locator('#scoreModal'));
+    assert.equal(await page.locator('#scoreOverview .score-ring>span').textContent(), String(expectedScore.score));
+    assert.equal(await page.locator('#scoreTitle').textContent(), `${name} — repayment score`); assert.equal(await page.locator('#scoreTitle b').count(), 0);
+    await page.getByText('How this score works', { exact: true }).click(); await visible(page.getByText('100 points', { exact: true }));
+    await page.getByText('View each scored installment', { exact: true }).click(); assert.equal(await page.locator('#scoreInstallments li').count(), expectedScore.assessed);
+    await page.screenshot({ path: path.join(out, 'score-desktop.png'), animations: 'disabled' });
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.ok(await page.locator('#scoreModal').evaluate(element => element.scrollWidth <= element.clientWidth), `Score panel fits at ${width}px`);
+    }
+    await page.screenshot({ path: path.join(out, 'score-mobile.png'), animations: 'disabled' });
+    await page.locator('#scoreModal [data-close]').first().click(); await hidden(page.locator('#scoreModal'));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(await page.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeScore);
+    await page.locator('#borrowerRows [data-action=score]').click(); await click('Open repayments');
+    await page.locator('#paymentRows tr').nth(1).getByRole('button').click();
+    await page.locator('#receiptForm [name=amount]').fill('200'); await click('Save payment'); await hidden(page.locator('#receiptModal'));
+    const changedScore = C.repaymentScore({ amount: 1800, months: 3, rate: 0, firstDue, payments: { 1: { amount: 600, date: C.today() }, 2: { amount: 200, date: C.today() } } });
+    assert.equal(await page.locator('#scoreOverview .score-ring>span').textContent(), String(changedScore.score));
+    await page.locator('#paymentRows tr').nth(1).getByRole('button').click();
+    await page.locator('#receiptForm [name=amount]').fill('100'); await click('Save payment'); await hidden(page.locator('#receiptModal'));
+    await page.locator('#paymentsModal').getByRole('button', { name: 'Done', exact: true }).click();
+    assert.equal(await page.locator('#scoreOverview .score-ring>span').textContent(), String(expectedScore.score));
+    await page.keyboard.press('Escape'); await hidden(page.locator('#scoreModal'));
     // Terms with recorded money require confirmation and reject incompatible edits.
     await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).click();
     await fields.locator('[name=amount]').fill('300'); await click('Save changes'); await visible(page.locator('#loanError'));
@@ -117,6 +144,7 @@ async function main() {
     const xlsxPath = await download(() => click('Download Excel (.xlsx)'), 'payments.xlsx');
     const Excel = require('../vendor/exceljs.min.js'), book = new Excel.Workbook(); await book.xlsx.load(await fs.readFile(xlsxPath));
     const sheet = book.worksheets[0]; assert.equal(sheet.rowCount, 4); assert.equal(sheet.getCell('T2').value, 'Paid late'); assert.equal(sheet.getCell('T2').font.color.argb, 'FF9C1C20'); assert.equal(sheet.getCell('P3').value, 100);
+    assert.equal(sheet.getCell('X2').value, expectedScore.score); assert.equal(sheet.getCell('Y2').value, expectedScore.assessed); assert.equal(sheet.getCell('Z2').value, 'local-v1');
     await page.locator('#utilityModal .close[data-close]').click();
     await click('Settings & backup'); await page.locator('#settingsCurrency').selectOption('CNY'); assert.ok((await page.locator('#totalOutstanding').textContent()).includes('0.00'));
     await page.locator('#settingsCurrency').selectOption('INR');
@@ -213,7 +241,7 @@ async function main() {
     // A different browser starts empty; encrypted backup + original password transfers the profile.
     const otherContext = await browser.newContext(); const otherPage = await otherContext.newPage(); await otherPage.goto(url);
     await visible(otherPage.getByRole('heading', { name: 'Create your local profile' }));
-    await otherPage.locator('details').evaluate(element => element.open = true);
+    await otherPage.locator('#authScreen details').evaluate(element => element.open = true);
     await otherPage.locator('#authRestore').setInputFiles(backupPath);
     await otherPage.locator('#passwordForm [name=password]').fill(testPassword); await otherPage.locator('#passwordForm').getByRole('button', { name: 'Continue' }).click();
     await otherPage.getByRole('button', { name: 'Restore profile', exact: true }).click();
@@ -222,7 +250,7 @@ async function main() {
     // Corrupt vault is never replaced by an empty portfolio, and raw recovery still downloads.
     await page.evaluate(() => localStorage.setItem('lendwiseVaultV1', '{broken')); await page.reload();
     await page.locator('#authForm [name=password]').fill(testPassword); await page.locator('#authSubmit').click(); await visible(page.locator('#authError'));
-    await page.locator('details').evaluate(element => element.open = true);
+    await page.locator('#authScreen details').evaluate(element => element.open = true);
     await download(() => click('Download encrypted recovery copy'), 'recovery.json');
     assert.equal(await fs.readFile(path.join(out, 'recovery.json'), 'utf8'), '{broken');
     await injectPortfolio(payload);
@@ -273,10 +301,12 @@ async function main() {
     await hidden(migrating.locator('#loanModal')); await hidden(secondTab.locator('#appShell'));
     assert.ok((await secondTab.locator('#authError').textContent()).includes('another tab'));
     await secondTab.close();
+    await migrating.locator('#borrowerRows [data-action=score]').first().click(); await visible(migrating.locator('#scoreModal'));
     // Idle lock scrubs the visible data, closes dialogs and keeps ciphertext intact.
     const beforeIdle = await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1'));
     await migrating.clock.fastForward(301000);
     await hidden(migrating.locator('#appShell'));
+    await hidden(migrating.locator('#scoreModal')); assert.equal(await migrating.locator('#scoreInstallments').textContent(), '');
     assert.equal((await migrating.locator('body').textContent()).includes('Changed from another tab'), false);
     assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeIdle);
     await migrating.setViewportSize({ width: 390, height: 844 });
@@ -303,7 +333,7 @@ async function main() {
     assert.equal(await migrating.evaluate(() => localStorage.getItem('unrelated-project-key')), 'keep me');
     await visible(migrating.getByRole('heading', { name: 'Create your local profile', exact: true }));
     await migrationContext.close(); assert.deepEqual(errors, []);
-    console.log('PASS: local profiles, encryption, wrong-password rejection, lock/reload, password change, encrypted restore, migration/copy removal, scoped profile deletion, custom dues, borrower CRUD, receipts/filters, progress bars, currency integrity, navigation, close/cancel/discard, search/filter/sort/pages, documents, CSV/XLSX, corruption/quota handling, 320–1440px layouts, reduced motion, no browser errors or off-origin requests in monitored flows.');
+    console.log('PASS: local profiles, encryption, wrong-password rejection, lock/reload, password change, encrypted restore, migration/copy removal, scoped profile deletion, custom dues, borrower CRUD, receipts/filters, progress bars, score breakdown/live edits/exports/lock scrubbing, currency integrity, navigation, close/cancel/discard, search/filter/sort/pages, documents, CSV/XLSX, corruption/quota handling, 320–1440px layouts, reduced motion, no browser errors or off-origin requests in monitored flows.');
   } finally { await browser.close(); server.close(); }
 }
 main().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

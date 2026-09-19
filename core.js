@@ -43,6 +43,24 @@
       return { number: i + 1, due, dueAmount: round(dueAmount), interest, principal, balance: custom ? null : balance, paid, paidDate: receipt?.date || '', remaining, lateDays, status, delayed: lateDays > 0 };
     });
   }
+  // Descriptive local payment-history indicator, not a credit/eligibility model.
+  // Due today and future installments never count, even if prepaid.
+  function repaymentScore(loan, asOf = today()) {
+    if (!parseDate(asOf)) throw new Error('Enter a valid score date.');
+    const installments = schedule(loan, asOf).filter(row => row.due < asOf && row.dueAmount > 0).map(row => {
+      // A later receipt must not improve an earlier snapshot. Individual partial
+      // receipt dates cannot be reconstructed from this app's single total/date.
+      const paid = row.paidDate && row.paidDate <= asOf ? row.paid : 0;
+      const complete = paid >= row.dueAmount;
+      const category = complete ? (row.paidDate <= row.due ? 'onTime' : 'paidLate') : paid > 0 ? 'partialOverdue' : 'unpaidOverdue';
+      const points = category === 'onTime' ? 100 : complete ? 50 : round(50 * paid / row.dueAmount);
+      return { number: row.number, due: row.due, dueAmount: row.dueAmount, paid, category, points };
+    });
+    const counts = { onTime: 0, paidLate: 0, partialOverdue: 0, unpaidOverdue: 0 };
+    for (const item of installments) counts[item.category]++;
+    const assessed = installments.length;
+    return { version: 'local-v1', asOf, assessed, score: assessed ? Math.floor(installments.reduce((total, item) => total + item.points, 0) / assessed + 1e-9) : null, ...counts, installments };
+  }
   function validateLoan(loan) {
     if (!loan || typeof loan !== 'object' || Array.isArray(loan)) throw new Error('Invalid borrower record.');
     if (typeof loan.name !== 'string' || !loan.name.trim()) throw new Error('Enter the borrower’s name.');
@@ -81,9 +99,12 @@
       return validateLoan({ ...item, id: item.id ?? `legacy-${i}`, currency: item.currency ?? 'USD', amount: numeric(item.amount), months: item.months == null ? 12 : numeric(item.months), repaymentMode: mode, rate: mode === 'custom' ? null : numeric(item.rate), payment: mode === 'custom' ? numeric(item.payment) : null, firstDue, payments: item.payments ?? {}, documents: item.documents ?? [] });
     });
   }
-  const headers = ['Borrower ID', 'Borrower', 'Phone', 'Address', 'Referrer', 'Family contact', 'Currency', 'Loan principal', 'Term (months)', 'Annual interest (%)', 'Installment', 'Due date', 'Scheduled payment', 'Principal portion', 'Interest portion', 'Received', 'Last received date', 'Remaining payment', 'Scheduled principal balance', 'Status', 'Days late', 'Report date', 'Repayment method'];
+  const headers = ['Borrower ID', 'Borrower', 'Phone', 'Address', 'Referrer', 'Family contact', 'Currency', 'Loan principal', 'Term (months)', 'Annual interest (%)', 'Installment', 'Due date', 'Scheduled payment', 'Principal portion', 'Interest portion', 'Received', 'Last received date', 'Remaining payment', 'Scheduled principal balance', 'Status', 'Days late', 'Report date', 'Repayment method', 'Local repayment score (not credit score)', 'Scored installments', 'Score formula version'];
   function exportRows(loans, asOf = today()) {
-    return loans.flatMap(loan => schedule(loan, asOf).map(row => [loan.id, loan.name, loan.phone, loan.address || '', loan.referrer || '', loan.family || '', loan.currency, loan.amount, loan.months, repaymentMode(loan) === 'custom' ? null : loan.rate, row.number, row.due, row.dueAmount, row.principal, row.interest, row.paid, row.paidDate, row.remaining, row.balance, row.status, row.lateDays, asOf, repaymentMode(loan) === 'custom' ? 'Custom monthly payment' : 'Interest-based']));
+    return loans.flatMap(loan => {
+      const score = repaymentScore(loan, asOf);
+      return schedule(loan, asOf).map(row => [loan.id, loan.name, loan.phone, loan.address || '', loan.referrer || '', loan.family || '', loan.currency, loan.amount, loan.months, repaymentMode(loan) === 'custom' ? null : loan.rate, row.number, row.due, row.dueAmount, row.principal, row.interest, row.paid, row.paidDate, row.remaining, row.balance, row.status, row.lateDays, asOf, repaymentMode(loan) === 'custom' ? 'Custom monthly payment' : 'Interest-based', score.score, score.assessed, score.version]);
+    });
   }
   function csvCell(value) {
     let text = value == null ? '' : String(value);
@@ -92,7 +113,7 @@
     return `"${text.replaceAll('"', '""')}"`;
   }
   const csv = (loans, asOf) => '\uFEFF' + [headers, ...exportRows(loans, asOf)].map(row => row.map(csvCell).join(',')).join('\r\n');
-  const api = { currencies, round, iso, today, parseDate, monthDate, daysBetween, payment, repaymentMode, schedule, validateLoan, migrate, headers, exportRows, csv };
+  const api = { currencies, round, iso, today, parseDate, monthDate, daysBetween, payment, repaymentMode, schedule, repaymentScore, validateLoan, migrate, headers, exportRows, csv };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LoanCore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

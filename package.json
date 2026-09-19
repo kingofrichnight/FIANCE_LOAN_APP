@@ -1,7 +1,7 @@
 {
   "name": "lendwise-portfolio",
   "private": true,
-  "version": "7.0.0",
+  "version": "8.0.0",
   "scripts": {
     "test": "node --test tests/core.test.cjs tests/vault.test.cjs",
     "test:ui": "node tests/browser.cjs"

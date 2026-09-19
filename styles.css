@@ -178,6 +178,17 @@ tbody tr:hover td { background-color: #f4f4f4; }
 .delayed-row td,tbody .delayed-row:hover td { color: #a12424; background: #fff6f6; }
 .repayment-progress { display: block; width: 80px; height: 5px; margin-top: 7px; accent-color: var(--ink); border: 0; background: #ddd; }
 .repayment-progress::-webkit-progress-bar { background: #ddd; }.repayment-progress::-webkit-progress-value { background: var(--ink); }
+.score-chip { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 5px 0; border: 0; background: transparent; text-align: left; font-size: 10px; font-weight: 600; }
+.score-chip:hover { background: transparent; text-decoration: underline; }
+.score-chip small { display: block; max-width: 145px; font-size: 9px; font-weight: 400; margin-top: 3px; line-height: 1.5; }
+.score-ring { display: inline-grid; place-content: center; width: 35px; height: 35px; border: 1.5px solid var(--ink); border-radius: 50%; font-size: 12px; line-height: 1.2; font-weight: 700; flex-shrink: 0; text-align: center; background: #fff; color: var(--ink); }
+.score-ring-large { width: 88px; height: 88px; font-size: 32px; border-width: 2px; box-shadow: 3px 3px 0 var(--ink); }
+.score-ring-large small { font: 10px/1.5 system-ui,sans-serif; display: block; }
+#scoreTitle { min-width: 0; overflow-wrap: anywhere; }
+.score-overview { display: flex; align-items: center; gap: 22px; margin: 25px 0; }.score-overview h3 { margin: 0 0 8px; font-size: 23px; }.score-overview p { font-size: 12px; margin-bottom: 5px; }
+.score-breakdown { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 22px 0; }.score-breakdown>div { border: 1px solid var(--ink); padding: 12px; }.score-breakdown dt { font-size: 11px; color: var(--muted); }.score-breakdown dd { margin: 7px 0 0; font-size: 22px; font-weight: 700; }
+.score-details { border-top: 1px dashed var(--ink); padding: 16px 0; font-size: 12px; line-height: 1.7; }.score-details summary { font-weight: 700; min-height: 32px; }.score-details p { margin-top: 12px; }
+.score-installments { list-style: none; padding: 0; margin: 8px 0 0; }.score-installments li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--rule); }.score-installments small { display: block; color: var(--muted); }.score-installments li>span { white-space: nowrap; font-weight: 700; }
 .table-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 16px 22px; color: var(--muted); font-size: 11px; }
 .table-footer>div { display: flex; gap: 7px; }.table-footer button { padding: 5px 12px; }
 .notebook-footer { display: flex; justify-content: space-between; gap: 15px; font-size: 9px; color: #666; margin-top: 30px; letter-spacing: .8px; }

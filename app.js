@@ -5,7 +5,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp
 const pageSize = 8;
 let loans = [], page = 0, editingId = null, paymentLoanId = null, receiptNumber = null;
 let documentsDraft = [], deletedLoan = null, toastTimer, appEpoch = 0;
-let loanDirty = false, receiptDirty = false;
+let loanDirty = false, receiptDirty = false, scoreLoanId = null;
 let currency = 'USD', remindersEnabled = true;
 const optionMarkup = Object.entries(C.currencies).map(([code, label]) => `<option value="${code}">${code} — ${label}</option>`).join('');
 $('#currencySelect').innerHTML = optionMarkup;
@@ -54,6 +54,26 @@ function loanState(loan) {
 }
 function statusBadge(status) { return `<span class="status ${status.includes('Overdue') || status === 'Paid late' ? 'overdue' : status.includes('Paid') ? 'ontime' : 'due'}">${esc(status)}</span>`; }
 function actionButton(action, id, text, extra = '') { return `<button class="row-btn ${action === 'delete' ? 'danger-text' : ''}" data-action="${action}" data-id="${esc(id)}" ${extra}>${text}</button>`; }
+const scoreCategories = { onTime: 'Paid on time', paidLate: 'Paid late', partialOverdue: 'Overdue — partial', unpaidOverdue: 'Overdue — nothing recorded' };
+function scoreButton(loan) {
+  const result = C.repaymentScore(loan);
+  const history = result.assessed ? `${result.assessed} scored month${result.assessed === 1 ? '' : 's'}${result.assessed < 3 ? ' · limited history' : ''}` : 'No history yet';
+  return `<button class="score-chip" data-action="score" data-id="${esc(loan.id)}" aria-label="Repayment score for ${esc(loan.name)}: ${result.score === null ? 'no history' : result.score + ' out of 100'}. View breakdown"><span class="score-ring" aria-hidden="true">${result.score ?? '—'}</span><span>Repayment score<small>${history}</small></span></button>`;
+}
+function renderScore() {
+  const loan = loans.find(item => item.id === scoreLoanId);
+  if (!loan) { $('#scoreModal').close(); return; }
+  const result = C.repaymentScore(loan);
+  $('#scoreTitle').textContent = `${loan.name} — repayment score`;
+  $('#scoreOverview').innerHTML = `<div class="score-ring score-ring-large"><span>${result.score ?? '—'}</span><small>${result.score === null ? 'no history' : '/ 100'}</small></div><div><h3>${result.score === null ? 'No history yet' : 'Recorded repayment history'}</h3><p>${result.assessed} installment${result.assessed === 1 ? '' : 's'} with a non-zero amount due before ${dateText(result.asOf)}.</p><p class="hint">${!result.assessed ? 'Due-today and future installments are not scored.' : result.assessed < 3 ? 'Limited history: fewer than three scored installments.' : 'More records provide context, not a guarantee of future repayment.'}</p></div>`;
+  $('#scoreBreakdown').innerHTML = Object.entries(scoreCategories).map(([key, label]) => `<div><dt>${label}</dt><dd>${result[key]}</dd></div>`).join('');
+  $('#scoreInstallments').innerHTML = result.installments.map(item => `<li><div><strong>Month ${item.number} · ${dateText(item.due)}</strong><small>${scoreCategories[item.category]} · ${money(item.paid, loan.currency)} / ${money(item.dueAmount, loan.currency)} received</small></div><span>${item.points} pts</span></li>`).join('') || '<li>No past installments to score yet.</li>';
+  $('#scorePaymentsBtn').dataset.id = loan.id;
+}
+function openScore(id) {
+  requireSession(); scoreLoanId = id; renderScore();
+  if (loans.some(loan => loan.id === id) && !$('#scoreModal').open) $('#scoreModal').showModal();
+}
 function render() {
   const selected = chosenLoans(), all = entries(selected), today = C.today();
   const overdue = all.filter(row => row.remaining > 0 && row.due < today);
@@ -71,6 +91,7 @@ function render() {
   $('#overdueCount').textContent = `${overdue.length} overdue installments`;
   $('#upcomingList').innerHTML = [...overdue, ...upcoming].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4).map(row => `<div class="upcoming-row"><div><strong>${esc(row.loan.name)}</strong><small>${dateText(row.due)} · Month ${row.number}</small></div><div class="due-amount"><strong>${money(row.remaining)}</strong>${statusBadge(row.status)}</div>${actionButton('payments', row.loan.id, 'Payments')}</div>`).join('') || '<p class="empty">No payments needing attention.</p>';
   renderRows(); renderChart(all);
+  if ($('#scoreModal').open) renderScore();
 }
 function renderRows() {
   const query = $('#searchInput').value.trim().toLocaleLowerCase();
@@ -84,7 +105,7 @@ function renderRows() {
   $('#borrowerRows').innerHTML = list.slice(page * pageSize, (page + 1) * pageSize).map(loan => {
     const state = loanState(loan);
     const progress = state.paid + state.remaining > 0 ? Math.round(state.paid / (state.paid + state.remaining) * 100) : 100;
-    return `<tr><td data-label="Borrower"><div class="person"><div><strong>${esc(loan.name)}</strong><small>${esc(loan.phone)}</small></div></div></td><td class="amount" data-label="Loan"><div><strong>${money(loan.amount)}</strong><small>${loan.months} months · ${loan.currency}</small></div></td><td data-label="Monthly payment">${money(state.rows[0].dueAmount)}</td><td data-label="Next due">${dateText(state.next?.due)}</td><td data-label="Received"><div>${money(state.paid)}<progress class="repayment-progress" value="${progress}" max="100" aria-label="${esc(loan.name)}: ${progress}% of scheduled repayments received"></progress><small class="block">${progress}% received</small></div></td><td data-label="Status">${statusBadge(state.status)}</td><td data-label="Actions"><div class="row-actions">${actionButton('payments', loan.id, 'Payments')}${actionButton('edit', loan.id, 'Edit')}${actionButton('delete', loan.id, 'Delete')}</div></td></tr>`;
+    return `<tr><td data-label="Borrower"><div class="person"><div><strong>${esc(loan.name)}</strong><small>${esc(loan.phone)}</small>${scoreButton(loan)}</div></div></td><td class="amount" data-label="Loan"><div><strong>${money(loan.amount)}</strong><small>${loan.months} months · ${loan.currency}</small></div></td><td data-label="Monthly payment">${money(state.rows[0].dueAmount)}</td><td data-label="Next due">${dateText(state.next?.due)}</td><td data-label="Received"><div>${money(state.paid)}<progress class="repayment-progress" value="${progress}" max="100" aria-label="${esc(loan.name)}: ${progress}% of scheduled repayments received"></progress><small class="block">${progress}% received</small></div></td><td data-label="Status">${statusBadge(state.status)}</td><td data-label="Actions"><div class="row-actions">${actionButton('payments', loan.id, 'Payments')}${actionButton('edit', loan.id, 'Edit')}${actionButton('delete', loan.id, 'Delete')}</div></td></tr>`;
   }).join('') || `<tr><td colspan="7" class="empty">${loans.length ? 'No borrowers match this currency, search, or filter.' : 'No borrowers yet. Add your first borrower to begin.'}</td></tr>`;
   $('#tableCount').textContent = list.length ? `Showing ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, list.length)} of ${list.length}` : 'Showing 0 borrowers';
   $('#prevPage').disabled = page === 0;
@@ -276,6 +297,7 @@ document.addEventListener('click', async event => {
     if (button.dataset.filter) { requireSession(); $('#statusFilter').value = button.dataset.filter; $('#searchInput').value = ''; page = 0; renderRows(); $('#borrowers').scrollIntoView({ block: 'start' }); $('#borrowers').focus({ preventScroll: true }); }
     const id = button.dataset.id;
     if (button.dataset.action === 'edit') openLoan(id);
+    if (button.dataset.action === 'score') openScore(id);
     if (button.dataset.action === 'delete') await deleteLoan(id);
     if (button.dataset.action === 'payments') openPayments(id);
     if (button.dataset.action === 'receipt') openReceipt(id, Number(button.dataset.number));
@@ -332,11 +354,12 @@ LoanAccount.start({
     if (remindersEnabled && entries().some(row => row.remaining > 0 && C.daysBetween(C.today(), row.due) <= 7)) toast('Payments need attention. Open Reminders to view them.');
   },
   lock: () => {
-    appEpoch++; loans = []; documentsDraft = []; deletedLoan = null; loanDirty = receiptDirty = false; editingId = paymentLoanId = receiptNumber = null;
+    appEpoch++; loans = []; documentsDraft = []; deletedLoan = null; loanDirty = receiptDirty = false; editingId = paymentLoanId = receiptNumber = scoreLoanId = null;
     form.reset(); $('#receiptForm').reset(); $('#searchInput').value = ''; $('#profileLabel').textContent = '';
     $('#sidebar').classList.remove('open'); $('#menuBtn').setAttribute('aria-expanded', 'false');
     $('#statusFilter').value = 'all'; $('#sortSelect').value = 'newest';
-    for (const id of ['paymentRows', 'paymentFilterCount', 'paymentsTitle', 'receiptSummary', 'utilityContent', 'existingDocuments', 'confirmText', 'toastText', 'paymentPreview', 'scheduleTotalPreview', 'repaymentHint', 'loanError', 'receiptError']) $('#' + id).textContent = '';
+    for (const id of ['paymentRows', 'paymentFilterCount', 'paymentsTitle', 'receiptSummary', 'utilityContent', 'existingDocuments', 'confirmText', 'toastText', 'paymentPreview', 'scheduleTotalPreview', 'repaymentHint', 'loanError', 'receiptError', 'scoreTitle', 'scoreOverview', 'scoreBreakdown', 'scoreInstallments']) $('#' + id).textContent = '';
+    delete $('#scorePaymentsBtn').dataset.id;
     $('#toast').classList.remove('show'); clearTimeout(toastTimer); render();
   }
 });
