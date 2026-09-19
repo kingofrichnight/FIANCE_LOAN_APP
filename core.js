@@ -44,36 +44,41 @@
     });
   }
   function validateLoan(loan) {
+    if (!loan || typeof loan !== 'object' || Array.isArray(loan)) throw new Error('Invalid borrower record.');
     if (typeof loan.name !== 'string' || !loan.name.trim()) throw new Error('Enter the borrower’s name.');
     if (typeof loan.phone !== 'string' || !loan.phone.trim()) throw new Error('Enter a phone number with country code.');
     for (const field of ['address', 'referrer', 'family']) if (loan[field] != null && typeof loan[field] !== 'string') throw new Error('Contact details must be text.');
     if (!Object.hasOwn(currencies, loan.currency)) throw new Error('Choose a supported loan currency.');
     if (loan.payments == null || typeof loan.payments !== 'object' || Array.isArray(loan.payments)) throw new Error('Invalid payment records.');
     if (!Number.isFinite(loan.amount) || loan.amount < .01 || loan.amount > 1e12) throw new Error('Loan amount must be between 0.01 and 1 trillion.');
+    if (Math.abs(loan.amount - round(loan.amount)) > 1e-7) throw new Error('Loan amount must have at most two decimal places.');
     if (!Number.isInteger(loan.months) || loan.months < 1 || loan.months > 600) throw new Error('Repayment term must be 1–600 whole months.');
     const mode = repaymentMode(loan);
     if (!['interest', 'custom'].includes(mode)) throw new Error('Choose a repayment method.');
     if (mode === 'interest' && (!Number.isFinite(loan.rate) || loan.rate < 0 || loan.rate > 100)) throw new Error('Annual interest must be between 0 and 100%.');
     if (mode === 'custom' && (!Number.isFinite(loan.payment) || loan.payment < .01 || loan.payment > 1e12 || Math.abs(loan.payment - round(loan.payment)) > 1e-7)) throw new Error('Enter a custom monthly payment between 0.01 and 1 trillion, with at most two decimal places.');
+    if (mode === 'custom' && !Number.isSafeInteger(Math.round(loan.payment * 100) * loan.months)) throw new Error('The total scheduled repayment is too large to track safely to the cent.');
     if (!parseDate(loan.firstDue) || loan.firstDue < '1900-01-01' || loan.firstDue > '2100-12-31') throw new Error('Enter a valid first payment date between 1900 and 2100.');
     const rows = schedule(loan);
     for (const [key, receipt] of Object.entries(loan.payments || {})) {
       if (!/^[1-9]\d*$/.test(key)) throw new Error('Payment records must use valid installment numbers.');
       const row = rows[Number(key) - 1];
-      if (!row || !receipt || !Number.isFinite(receipt.amount) || receipt.amount <= 0 || receipt.amount > row.dueAmount + .001 || !parseDate(receipt.date)) throw new Error('These terms conflict with recorded payments. Correct those payments first.');
+      if (!row || !receipt || !Number.isFinite(receipt.amount) || receipt.amount <= 0 || Math.abs(receipt.amount - round(receipt.amount)) > 1e-7 || receipt.amount > row.dueAmount + .001 || !parseDate(receipt.date) || receipt.date > today()) throw new Error('These terms conflict with recorded payments. Correct those payments first.');
     }
     return loan;
   }
   function migrate(items) {
     if (!Array.isArray(items)) throw new Error('Saved borrower data is not a list.');
     return items.map((item, i) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Invalid borrower record in backup.');
+      const numeric = value => typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
       let firstDue = item.firstDue;
       if (!firstDue) {
         const date = new Date(item.due);
         firstDue = Number.isNaN(date.valueOf()) ? '' : iso(date);
       }
       const mode = item.repaymentMode || (item.rate == null ? 'custom' : 'interest');
-      return validateLoan({ ...item, id: item.id || `legacy-${i}`, currency: item.currency || 'USD', amount: Number(item.amount), months: Number(item.months || 12), repaymentMode: mode, rate: mode === 'custom' ? null : (item.rate == null ? null : Number(item.rate)), payment: Number(item.payment), firstDue, payments: item.payments || {}, documents: item.documents || [] });
+      return validateLoan({ ...item, id: item.id ?? `legacy-${i}`, currency: item.currency ?? 'USD', amount: numeric(item.amount), months: item.months == null ? 12 : numeric(item.months), repaymentMode: mode, rate: mode === 'custom' ? null : numeric(item.rate), payment: mode === 'custom' ? numeric(item.payment) : null, firstDue, payments: item.payments ?? {}, documents: item.documents ?? [] });
     });
   }
   const headers = ['Borrower ID', 'Borrower', 'Phone', 'Address', 'Referrer', 'Family contact', 'Currency', 'Loan principal', 'Term (months)', 'Annual interest (%)', 'Installment', 'Due date', 'Scheduled payment', 'Principal portion', 'Interest portion', 'Received', 'Last received date', 'Remaining payment', 'Scheduled principal balance', 'Status', 'Days late', 'Report date', 'Repayment method'];

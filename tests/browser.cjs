@@ -37,6 +37,8 @@ async function main() {
   };
   try {
     await page.goto(url);
+    await page.screenshot({ path: path.join(out, 'paper-profile-desktop.png'), fullPage: true, animations: 'disabled' });
+    await click('How your data is stored'); await visible(page.getByRole('heading', { name: 'How your data is stored', exact: true })); await page.locator('#utilityModal .close[data-close]').click();
     await hidden(page.locator('#appShell'));
     await page.locator('#authForm [name=profileName]').fill('QA profile');
     await page.locator('#authForm [name=password]').fill(testPassword);
@@ -50,6 +52,10 @@ async function main() {
     await page.locator('#loanModal [data-close]').first().click(); await hidden(page.locator('#loanModal'));
     await page.locator('#newLoanHero').click(); await page.locator('#loanModal').getByRole('button', { name: 'Cancel' }).click();
     await page.locator('#addBorrower').click(); await page.keyboard.press('Escape'); await hidden(page.locator('#loanModal'));
+    await page.locator('#addBorrower').click(); await page.locator('#loanForm [name=name]').fill('Unsaved entry'); await page.keyboard.press('Escape');
+    await visible(page.getByRole('heading', { name: 'Discard unsaved changes?' })); await page.locator('#confirmModal').getByRole('button', { name: 'Cancel', exact: true }).click(); await visible(page.locator('#loanModal'));
+    await page.locator('#loanModal .close').click(); await click('Discard changes'); await hidden(page.locator('#loanModal'));
+    await visible(page.getByText('No borrowers yet. Add your first borrower to begin.'));
     await page.locator('#currencySelect').selectOption('INR');
     await page.locator('#addBorrower').click();
     const fields = page.locator('#loanForm');
@@ -78,7 +84,11 @@ async function main() {
     await page.locator('#receiptForm [name=amount]').fill('100'); await click('Save payment'); await hidden(page.locator('#receiptModal'));
     assert.ok((await page.locator('#paymentRows tr').nth(1).textContent()).includes('Overdue (partial)'));
     assert.ok((await page.locator('#totalOutstanding').textContent()).includes('1,100'));
-    await page.screenshot({ path: path.join(out, 'repayments-desktop.png'), fullPage: true });
+    assert.equal(await page.locator('#borrowerRows progress').getAttribute('value'), '39');
+    await page.locator('#paymentStatusFilter').selectOption('paid'); assert.equal(await page.locator('#paymentRows tr').count(), 1);
+    await page.locator('#paymentStatusFilter').selectOption('open'); assert.equal(await page.locator('#paymentRows tr').count(), 2);
+    await page.locator('#paymentStatusFilter').selectOption('all');
+    await page.screenshot({ path: path.join(out, 'repayments-desktop.png'), fullPage: true, animations: 'disabled' });
     await page.locator('#paymentsModal').getByRole('button', { name: 'Done', exact: true }).click();
     // Terms with recorded money require confirmation and reject incompatible edits.
     await page.locator('#borrowerRows').getByRole('button', { name: 'Edit', exact: true }).click();
@@ -86,6 +96,9 @@ async function main() {
     await fields.locator('[name=amount]').fill('1800'); await fields.locator('[name=firstDue]').fill(C.monthDate(firstDue, -1)); await click('Save changes');
     await visible(page.locator('#confirmModal')); await page.locator('#confirmModal').getByRole('button', { name: 'Cancel' }).click();
     await page.locator('#loanModal [data-close]').first().click();
+    await click('Discard changes'); await hidden(page.locator('#loanModal'));
+    await click('Review overdue loans ↗'); assert.equal(await page.locator('#statusFilter').inputValue(), 'overdue');
+    await click('View active loans ↗'); assert.equal(await page.locator('#statusFilter').inputValue(), 'active'); await page.locator('#statusFilter').selectOption('all');
     await page.locator('#searchInput').fill('missing name'); assert.ok((await page.locator('#borrowerRows').textContent()).includes('No borrowers match'));
     await page.locator('#searchInput').fill(''); await page.locator('#statusFilter').selectOption('paid'); assert.ok((await page.locator('#tableCount').textContent()).includes('0'));
     await page.locator('#statusFilter').selectOption('overdue'); await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
@@ -132,15 +145,32 @@ async function main() {
     await page.getByRole('button', { name: 'Reports', exact: true }).click(); await page.locator('#utilityModal .close[data-close]').click();
     await click('View all'); await page.locator('#paymentsModal .close[data-close]').click();
     await click('Manage backups'); await page.locator('#utilityModal .close[data-close]').click();
-    await page.screenshot({ path: path.join(out, 'dashboard-desktop.png'), fullPage: true });
+    await click('Settings & backup'); await page.locator('#motionToggle').uncheck();
+    assert.equal(await page.locator('html').getAttribute('data-motion'), 'off');
+    await page.locator('#motionToggle').check(); assert.equal(await page.locator('html').getAttribute('data-motion'), 'on');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.locator('html[data-motion="off"]').waitFor();
+    assert.equal(await page.locator('html').getAttribute('data-motion'), 'off');
+    assert.equal(await page.locator('#utilityModal').evaluate(element => getComputedStyle(element).animationName), 'none');
+    await page.emulateMedia({ reducedMotion: 'no-preference' }); await page.locator('#utilityModal .close[data-close]').click();
+    await page.screenshot({ path: path.join(out, 'dashboard-desktop.png'), fullPage: true, animations: 'disabled' });
     // Phone controls stay reachable, and dialogs have no clipped close/save buttons.
     await page.setViewportSize({ width: 390, height: 844 });
     await click('Toggle menu'); await visible(page.locator('#sidebar')); await click('Reports'); await page.locator('#utilityModal .close[data-close]').click();
     assert.equal(await page.locator('#menuBtn').getAttribute('aria-expanded'), 'false');
     await click('Toggle menu'); await click('Toggle menu');
-    await page.locator('#newLoanTop').click(); await page.screenshot({ path: path.join(out, 'loan-mobile.png') }); await page.locator('#loanModal [data-close]').first().click();
+    await page.locator('#newLoanTop').click(); await page.screenshot({ path: path.join(out, 'loan-mobile.png'), animations: 'disabled' });
+    assert.ok(await page.locator('#saveLoan').evaluate(button => {
+      const bounds = button.getBoundingClientRect(), modal = button.closest('dialog').getBoundingClientRect();
+      return bounds.bottom <= modal.bottom && bounds.top >= modal.top && bounds.right <= modal.right;
+    }), 'The entire save button fits inside the phone dialog');
+    await page.locator('#loanModal [data-close]').first().click();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
-    await page.screenshot({ path: path.join(out, 'dashboard-mobile.png'), fullPage: true });
+    await page.screenshot({ path: path.join(out, 'dashboard-mobile.png'), fullPage: true, animations: 'disabled' });
+    for (const width of [320, 375, 768, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `No horizontal page overflow at ${width}px`);
+    }
     // Clear receipt flow, document removal, invalid restore and storage failures.
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.locator('#searchInput').fill(name);
@@ -223,6 +253,17 @@ async function main() {
     assert.equal(migratedVault.payload.portfolio.loans.length, payload.loans.length);
     assert.equal(migratedVault.payload.legacyRecovery.lendwisePortfolioV3, oldData);
     assert.equal(migratedVault.payload.legacyRecovery.lendwiseBorrowers, oldLegacy);
+    // Removing recovery copies never changes active borrower records.
+    await migrating.getByRole('button', { name: 'Settings & backup', exact: true }).click();
+    await migrating.getByRole('button', { name: 'Remove old migration copies', exact: true }).click();
+    await migrating.locator('#confirmModal').getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal((await V.unlock(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), testPassword)).payload.legacyRecovery.lendwiseBorrowers, oldLegacy);
+    await migrating.getByRole('button', { name: 'Remove old migration copies', exact: true }).click();
+    await migrating.getByRole('button', { name: 'Remove old copies', exact: true }).click();
+    await visible(migrating.getByText('No old migration copies are retained in this profile.', { exact: true }));
+    const afterPurge = (await V.unlock(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), testPassword)).payload;
+    assert.equal(afterPurge.legacyRecovery, undefined); assert.deepEqual(afterPurge.portfolio, migratedVault.payload.portfolio);
+    await migrating.locator('#utilityModal .close[data-close]').click();
     // A write in a second tab invalidates the first unlocked view, not just its next save.
     const secondTab = await migrationContext.newPage(); await secondTab.goto(url);
     await secondTab.locator('#authForm [name=password]').fill(testPassword); await secondTab.locator('#authSubmit').click(); await visible(secondTab.locator('#appShell'));
@@ -239,10 +280,30 @@ async function main() {
     assert.equal((await migrating.locator('body').textContent()).includes('Changed from another tab'), false);
     assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeIdle);
     await migrating.setViewportSize({ width: 390, height: 844 });
-    await migrating.screenshot({ path: path.join(out, 'local-profile-mobile.png'), fullPage: true });
+    await migrating.screenshot({ path: path.join(out, 'local-profile-mobile.png'), fullPage: true, animations: 'disabled' });
     assert.ok(await migrating.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    // Profile deletion is password-confirmed, cancelable, and scoped to only Lendwise keys.
+    await migrating.setViewportSize({ width: 1440, height: 1000 });
+    await migrating.locator('#authForm [name=password]').fill(testPassword); await migrating.locator('#authSubmit').click(); await visible(migrating.locator('#appShell'));
+    await migrating.evaluate(() => localStorage.setItem('unrelated-project-key', 'keep me'));
+    const beforeDelete = await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1'));
+    await migrating.getByRole('button', { name: 'Settings & backup', exact: true }).click(); await migrating.getByRole('button', { name: 'Delete local profile', exact: true }).click();
+    await migrating.locator('#passwordForm [name=password]').fill('Wrong password'); await migrating.locator('#passwordForm').getByRole('button', { name: 'Continue' }).click();
+    await visible(migrating.getByText('Incorrect password, or the encrypted data is damaged. Nothing has been changed.', { exact: true }));
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeDelete);
+    const requestDelete = async () => {
+      await migrating.getByRole('button', { name: 'Delete local profile', exact: true }).click();
+      await migrating.locator('#passwordForm [name=password]').fill(testPassword); await migrating.locator('#passwordForm').getByRole('button', { name: 'Continue' }).click();
+      await visible(migrating.getByRole('heading', { name: 'Permanently delete this local profile?' }));
+    };
+    await requestDelete(); await migrating.locator('#confirmModal').getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeDelete);
+    await requestDelete(); await migrating.getByRole('button', { name: 'Delete profile permanently', exact: true }).click(); await hidden(migrating.locator('#appShell'));
+    assert.deepEqual(await migrating.evaluate(() => ['lendwiseVaultV1', 'lendwisePortfolioV3', 'lendwiseBorrowers', 'lendwiseCurrency', 'lendwiseMotion'].map(key => localStorage.getItem(key))), [null, null, null, null, null]);
+    assert.equal(await migrating.evaluate(() => localStorage.getItem('unrelated-project-key')), 'keep me');
+    await visible(migrating.getByRole('heading', { name: 'Create your local profile', exact: true }));
     await migrationContext.close(); assert.deepEqual(errors, []);
-    console.log('PASS: local profiles, encryption, wrong-password rejection, lock/reload, password change, cross-device encrypted restore, custom dues, borrower CRUD, receipts, currency integrity, all navigation, close/cancel, search/filter/sort/pages, documents, CSV/XLSX, corruption/quota handling, mobile layout, no browser errors or off-origin requests.');
+    console.log('PASS: local profiles, encryption, wrong-password rejection, lock/reload, password change, encrypted restore, migration/copy removal, scoped profile deletion, custom dues, borrower CRUD, receipts/filters, progress bars, currency integrity, navigation, close/cancel/discard, search/filter/sort/pages, documents, CSV/XLSX, corruption/quota handling, 320–1440px layouts, reduced motion, no browser errors or off-origin requests in monitored flows.');
   } finally { await browser.close(); server.close(); }
 }
 main().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

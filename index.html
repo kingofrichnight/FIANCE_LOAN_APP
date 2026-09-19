@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#157347">
+  <meta name="theme-color" content="#f6f1e6">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Lendwise — Loan Portfolio</title>
-  <link rel="stylesheet" href="styles.css?v=5">
-  <script src="core.js?v=5" defer></script><script src="vault.js?v=5" defer></script><script src="account.js?v=5" defer></script><script src="export.js?v=5" defer></script><script src="app.js?v=5" defer></script>
+  <link rel="stylesheet" href="styles.css?v=6">
+  <script src="core.js?v=6" defer></script><script src="vault.js?v=6" defer></script><script src="account.js?v=6" defer></script><script src="export.js?v=6" defer></script><script src="app.js?v=6" defer></script><script src="paper.js?v=6" defer></script>
 </head>
 <body>
   <section class="auth-screen" id="authScreen" aria-labelledby="authTitle">
+    <div class="auth-intro"><p class="eyebrow">LENDWISE / THE PERSONAL LEDGER</p><h2>A little order.<br> A clearer <em>picture.</em></h2><p>A quiet place for your loans, repayments and the people behind the numbers.</p><div class="paper-sketch" aria-hidden="true"><span class="sketch-caption">one month at a time</span><div class="sketch-sheet"><span>My loan notebook</span><i></i><i></i><i></i><b>✓ recorded &amp; remembered</b></div><div class="sketch-pencil"></div></div><p class="handwritten">Your notebook. Your device.</p><small>No shared database. No automatic sync.</small></div>
     <div class="auth-card"><div class="auth-brand"><span class="brand-mark">L</span><strong>Lendwise</strong><span>DEVICE-LOCAL</span></div>
       <h1 id="authTitle">Your private local portfolio</h1><p>Borrowers, payments and documents stay in this browser on this device. Your saved profile is encrypted with your password.</p>
       <p id="authError" class="notice error" role="alert" hidden></p>
@@ -26,6 +27,7 @@
       <p class="hint">One profile per browser. This is not an online account. On another device, restore an encrypted backup using its password. Clearing site data or losing both your device and backup can lose your records. Do not use private/incognito mode for permanent storage.</p>
       <details><summary>Restore or recover a profile</summary><label class="setting-label">Restore an encrypted backup<input type="file" id="authRestore" accept="application/json,.json"></label><button class="secondary" id="authRecovery" hidden>Download encrypted recovery copy</button></details>
       <p class="hint">The website address can be public without sharing your local records. Encryption does not protect an unlocked session from malicious scripts, browser extensions or someone using your device.</p>
+      <button type="button" class="text-btn" data-open="privacy">How your data is stored</button>
     </div>
   </section>
   <div class="app-shell" id="appShell" hidden>
@@ -35,6 +37,7 @@
         <p class="nav-label">WORKSPACE</p><a class="nav-item active" href="#overview">Overview</a><a class="nav-item" href="#borrowers">Borrowers <b id="navCount">0</b></a>
         <button class="nav-item" data-open="repayments">Repayments</button><button class="nav-item" data-open="reminders">Reminders <i id="reminderCount">0</i></button>
         <p class="nav-label">MANAGE</p><button class="nav-item" data-open="documents">Documents</button><button class="nav-item" data-open="reports">Reports</button><button class="nav-item" data-open="settings">Settings &amp; backup</button>
+        <button class="nav-item" data-open="privacy">How your data is stored</button>
       </nav>
       <div class="sidebar-card"><strong>Your portfolio, on this device</strong><p>Export a backup before switching phones or clearing browser data.</p><button data-open="settings">Manage backups</button></div>
       <div class="local-account"><strong id="profileLabel"></strong><small>Encrypted local profile</small><button class="secondary" id="signOutBtn">Sign out &amp; lock</button></div>
@@ -47,22 +50,24 @@
       </header>
       <div class="page" id="overview">
         <div id="storageError" class="notice error" role="alert" hidden></div>
-        <section class="hero-row"><div><p class="eyebrow" id="currentDate"></p><h1>Your loan portfolio</h1><p id="currencyNote"></p></div><div class="hero-actions"><button class="secondary" id="exportBtn">Export report</button><button class="primary" id="newLoanHero">＋ New loan</button></div></section>
+        <section class="hero-row"><div><p class="eyebrow" id="currentDate"></p><h1>Your loan <em>notebook.</em></h1><p id="currencyNote"></p></div><div class="hero-actions"><button class="secondary" id="exportBtn">Export report</button><button class="primary" id="newLoanHero">＋ New loan</button></div></section>
+        <div class="notebook-caption"><span>THE BIG PICTURE</span><span class="handwritten">Every entry tells a story.</span></div>
         <section class="metrics" aria-label="Portfolio totals">
-          <article><p>Remaining repayments</p><h2 id="totalOutstanding">0</h2><small id="activeCount">No active loans</small></article>
+          <article><p>Remaining repayments</p><h2 id="totalOutstanding">0</h2><small id="activeCount">No active loans</small><button class="metric-link" data-filter="active">View active loans ↗</button></article>
           <article><p>Collected this month</p><h2 id="collectedTotal">0</h2><small>Based on recorded payment dates</small></article>
           <article><p>Due in next 7 days</p><h2 id="upcomingTotal">0</h2><small id="upcomingCount"></small></article>
-          <article><p>Overdue amount</p><h2 id="overdueTotal">0</h2><small id="overdueCount"></small></article>
+          <article class="overdue-card"><p>Overdue amount</p><h2 id="overdueTotal">0</h2><small id="overdueCount"></small><button class="metric-link" data-filter="overdue">Review overdue loans ↗</button></article>
         </section>
         <section class="dashboard-grid">
           <article class="panel collection-card"><div class="panel-title"><div><h3>Collection overview</h3><p>Scheduled vs received</p></div><label><span class="sr-only">Chart period</span><select id="chartPeriod"><option value="6">Last 6 months</option><option value="12">Last 12 months</option></select></label></div><div class="chart-wrap"><div class="y-axis" id="chartAxis"></div><div class="chart" id="chart" role="img" aria-label="Monthly collection chart"></div></div><div class="legend"><span><i class="dot expected"></i>Scheduled</span><span><i class="dot collected"></i>Received</span></div><p class="hint" id="chartEmpty"></p></article>
           <article class="panel upcoming"><div class="panel-title"><div><h3>Payments needing attention</h3><p>Overdue and due in the next 7 days</p></div><button class="text-btn" data-open="repayments">View all</button></div><div id="upcomingList"></div></article>
         </section>
-        <section class="panel borrowers" id="borrowers">
+        <section class="panel borrowers" id="borrowers" tabindex="-1">
           <div class="panel-title"><div><h3>Borrowers</h3><p>Manage loan details and monthly payments</p></div><div class="table-actions"><label><span class="sr-only">Filter borrowers</span><select id="statusFilter"><option value="all">All statuses</option><option value="overdue">Overdue</option><option value="active">Active</option><option value="paid">Paid off</option></select></label><label><span class="sr-only">Sort borrowers</span><select id="sortSelect"><option value="newest">Newest first</option><option value="name">Name A–Z</option><option value="amount">Largest loan</option><option value="due">Next due date</option></select></label><button class="primary" id="addBorrower">＋ Add borrower</button></div></div>
           <div class="table-scroll"><table><thead><tr><th>BORROWER</th><th>LOAN</th><th>MONTHLY PAYMENT</th><th>NEXT DUE</th><th>RECEIVED</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="borrowerRows"></tbody></table></div>
           <div class="table-footer"><span id="tableCount"></span><div><button id="prevPage" aria-label="Previous page">←</button><button id="nextPage" aria-label="Next page">→</button></div></div>
         </section>
+        <footer class="notebook-footer"><span>END OF THIS PAGE / LENDWISE</span><span>Kept on this device. Remember your backups.</span></footer>
       </div>
     </main>
   </div>

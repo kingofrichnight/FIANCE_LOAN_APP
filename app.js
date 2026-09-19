@@ -5,6 +5,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp
 const pageSize = 8;
 let loans = [], page = 0, editingId = null, paymentLoanId = null, receiptNumber = null;
 let documentsDraft = [], deletedLoan = null, toastTimer, appEpoch = 0;
+let loanDirty = false, receiptDirty = false;
 let currency = 'USD', remindersEnabled = true;
 const optionMarkup = Object.entries(C.currencies).map(([code, label]) => `<option value="${code}">${code} — ${label}</option>`).join('');
 $('#currencySelect').innerHTML = optionMarkup;
@@ -23,7 +24,7 @@ function validateCollection(items) {
   const result = C.migrate(items);
   const ids = new Set();
   for (const loan of result) {
-    if (typeof loan.id !== 'string' || ids.has(loan.id)) throw new Error('Borrower IDs must be unique.');
+    if (typeof loan.id !== 'string' || !loan.id.trim() || ids.has(loan.id)) throw new Error('Borrower IDs must be non-empty and unique.');
     ids.add(loan.id); validateDocuments(loan.documents);
   }
   return result;
@@ -82,7 +83,8 @@ function renderRows() {
   page = Math.max(0, Math.min(page, Math.ceil(list.length / pageSize) - 1));
   $('#borrowerRows').innerHTML = list.slice(page * pageSize, (page + 1) * pageSize).map(loan => {
     const state = loanState(loan);
-    return `<tr><td data-label="Borrower"><div class="person"><div><strong>${esc(loan.name)}</strong><small>${esc(loan.phone)}</small></div></div></td><td class="amount" data-label="Loan"><div><strong>${money(loan.amount)}</strong><small>${loan.months} months · ${loan.currency}</small></div></td><td data-label="Monthly payment">${money(state.rows[0].dueAmount)}</td><td data-label="Next due">${dateText(state.next?.due)}</td><td data-label="Received">${money(state.paid)}</td><td data-label="Status">${statusBadge(state.status)}</td><td data-label="Actions"><div class="row-actions">${actionButton('payments', loan.id, 'Payments')}${actionButton('edit', loan.id, 'Edit')}${actionButton('delete', loan.id, 'Delete')}</div></td></tr>`;
+    const progress = state.paid + state.remaining > 0 ? Math.round(state.paid / (state.paid + state.remaining) * 100) : 100;
+    return `<tr><td data-label="Borrower"><div class="person"><div><strong>${esc(loan.name)}</strong><small>${esc(loan.phone)}</small></div></div></td><td class="amount" data-label="Loan"><div><strong>${money(loan.amount)}</strong><small>${loan.months} months · ${loan.currency}</small></div></td><td data-label="Monthly payment">${money(state.rows[0].dueAmount)}</td><td data-label="Next due">${dateText(state.next?.due)}</td><td data-label="Received"><div>${money(state.paid)}<progress class="repayment-progress" value="${progress}" max="100" aria-label="${esc(loan.name)}: ${progress}% of scheduled repayments received"></progress><small class="block">${progress}% received</small></div></td><td data-label="Status">${statusBadge(state.status)}</td><td data-label="Actions"><div class="row-actions">${actionButton('payments', loan.id, 'Payments')}${actionButton('edit', loan.id, 'Edit')}${actionButton('delete', loan.id, 'Delete')}</div></td></tr>`;
   }).join('') || `<tr><td colspan="7" class="empty">${loans.length ? 'No borrowers match this currency, search, or filter.' : 'No borrowers yet. Add your first borrower to begin.'}</td></tr>`;
   $('#tableCount').textContent = list.length ? `Showing ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, list.length)} of ${list.length}` : 'Showing 0 borrowers';
   $('#prevPage').disabled = page === 0;
@@ -96,7 +98,7 @@ function renderChart(all) {
   });
   const maximum = Math.max(1, ...data.flatMap(item => [item.expected, item.received]));
   $('#chartAxis').innerHTML = [1, .5, 0].map(fraction => `<span>${esc(new Intl.NumberFormat(navigator.language, { notation: 'compact', maximumFractionDigits: 1 }).format(maximum * fraction))}</span>`).join('');
-  $('#chart').innerHTML = data.map(item => `<div class="bar-group" title="${esc(`${item.label}: scheduled ${money(item.expected)}, received ${money(item.received)}`)}"><i class="bar expected" style="height:${item.expected / maximum * 100}%"></i><i class="bar collected" style="height:${item.received / maximum * 100}%"></i><span class="bar-label">${esc(item.label)}</span></div>`).join('');
+  $('#chart').innerHTML = data.map(item => `<div class="bar-group" tabindex="0" title="${esc(`${item.label}: scheduled ${money(item.expected)}, received ${money(item.received)}`)}" aria-label="${esc(`${item.label}: scheduled ${money(item.expected)}, received ${money(item.received)}`)}"><i class="bar expected" style="height:${item.expected / maximum * 100}%"></i><i class="bar collected" style="height:${item.received / maximum * 100}%"></i><span class="bar-label">${esc(item.label)}</span></div>`).join('');
   $('#chart').setAttribute('aria-label', `${currency} collection chart. ` + data.map(item => `${item.label}: scheduled ${money(item.expected)}, received ${money(item.received)}`).join('. '));
   $('#chartEmpty').textContent = all.length ? `Values in ${currency}` : 'Add a loan to see its repayment schedule here.';
 }
@@ -123,7 +125,7 @@ function previewPayment() {
 }
 function renderDraftDocuments() { $('#existingDocuments').innerHTML = documentsDraft.map((doc, i) => `<div class="document-row"><span>${esc(doc.name)}</span><button type="button" class="text-btn danger-text" data-remove-doc="${i}">Remove</button></div>`).join(''); }
 function openLoan(id = null) {
-  editingId = id; form.reset(); showError('#loanError', '');
+  requireSession(); editingId = id; loanDirty = false; form.reset(); showError('#loanError', '');
   const loan = loans.find(item => item.id === id);
   $('#loanTitle').textContent = loan ? 'Edit borrower & loan' : 'Add a new borrower';
   $('#saveLoan').textContent = loan ? 'Save changes' : 'Save borrower & loan';
@@ -135,8 +137,20 @@ function openLoan(id = null) {
   $('#loanModal').showModal();
 }
 async function confirmAction(title, message, label = 'Confirm') {
-  const dialog = $('#confirmModal'); $('#confirmTitle').textContent = title; $('#confirmText').textContent = message; $('#confirmAction').textContent = label; dialog.returnValue = '';
+  const dialog = $('#confirmModal');
+  if (dialog.open) return false;
+  $('#confirmTitle').textContent = title; $('#confirmText').textContent = message; $('#confirmAction').textContent = label; dialog.returnValue = '';
   return new Promise(resolve => { dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true }); dialog.showModal(); });
+}
+async function closeEditor(dialog) {
+  const loan = dialog.id === 'loanModal', receipt = dialog.id === 'receiptModal';
+  if ((loan && $('#saveLoan').disabled) || (receipt && $('#receiptForm [type=submit]').disabled)) { toast('Please wait for the save to finish.'); return; }
+  if ((loan && loanDirty) || (receipt && receiptDirty)) {
+    if (!await confirmAction('Discard unsaved changes?', 'Your edits have not been saved. Keep editing to finish this entry, or discard these changes.', 'Discard changes')) return;
+  }
+  if (loan) loanDirty = false;
+  if (receipt) receiptDirty = false;
+  dialog.close();
 }
 function readFile(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ id: crypto.randomUUID(), name: file.name, data: reader.result }); reader.onerror = () => reject(new Error('Unable to read document.')); reader.readAsDataURL(file); }); }
 form.addEventListener('submit', async event => {
@@ -145,6 +159,7 @@ form.addEventListener('submit', async event => {
   $('#saveLoan').disabled = true; showError('#loanError', '');
   try {
     const files = [...form.elements.documents.files];
+    if (files.length + documentsDraft.length > 10) throw new Error('Keep at most 10 documents per borrower.');
     if (files.some(file => file.size > 1024 * 1024 || !['application/pdf', 'image/png', 'image/jpeg', 'image/webp'].includes(file.type))) throw new Error('Use PDF, PNG, JPEG or WebP files no larger than 1 MB each.');
     const loan = formLoan(), old = loans.find(item => item.id === editingId);
     loan.documents = [...documentsDraft, ...await Promise.all(files.map(readFile))];
@@ -156,11 +171,13 @@ form.addEventListener('submit', async event => {
     }
     await persist(old ? loans.map(item => item.id === old.id ? loan : item) : [loan, ...loans], generation);
     if (currency !== loan.currency) setCurrency(loan.currency);
-    $('#loanModal').close(); toast(old ? 'Borrower and loan updated.' : 'Borrower and loan saved.');
+    loanDirty = false; $('#loanModal').close(); toast(old ? 'Borrower and loan updated.' : 'Borrower and loan saved.');
   } catch (error) { showError('#loanError', error.message); }
   finally { $('#saveLoan').disabled = false; }
 });
 function openPayments(id = null) {
+  requireSession();
+  $('#paymentStatusFilter').value = 'all';
   paymentLoanId = id; renderPayments();
   if (!$('#paymentsModal').open) $('#paymentsModal').showModal();
 }
@@ -168,9 +185,13 @@ function renderPayments() {
   const items = paymentLoanId ? loans.filter(item => item.id === paymentLoanId) : chosenLoans();
   $('#paymentsTitle').textContent = paymentLoanId ? `${items[0]?.name || 'Borrower'} — repayments` : `${currency} monthly repayments`;
   $('#paymentsSubtitle').textContent = 'Record receipts to keep overdue balances accurate. Red marks overdue or paid-late installments.';
-  $('#paymentRows').innerHTML = entries(items).map(row => `<tr class="${row.delayed ? 'delayed-row' : ''}"><td data-label="Installment"><div>${paymentLoanId ? '' : `<strong>${esc(row.loan.name)}</strong><br>`}Month ${row.number}</div></td><td data-label="Due date">${dateText(row.due)}</td><td data-label="Scheduled">${money(row.dueAmount, row.loan.currency)}</td><td data-label="Received"><div>${money(row.paid, row.loan.currency)}<small class="block">${row.paidDate ? dateText(row.paidDate) : ''}</small></div></td><td data-label="Remaining">${money(row.remaining, row.loan.currency)}</td><td data-label="Status"><div>${statusBadge(row.status)}${row.lateDays ? `<small class="block">${row.lateDays} days late</small>` : ''}</div></td><td data-label="Action">${actionButton('receipt', row.loan.id, row.paid ? 'Edit payment' : 'Record payment', `data-number="${row.number}"`)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No repayments for this currency yet.</td></tr>';
+  const all = entries(items), filter = $('#paymentStatusFilter').value;
+  const filtered = all.filter(row => filter === 'all' || (filter === 'open' ? row.remaining > 0 : filter === 'paid' ? row.remaining === 0 : row.remaining > 0 && row.due < C.today()));
+  $('#paymentFilterCount').textContent = `${filtered.length} of ${all.length} installments`;
+  $('#paymentRows').innerHTML = filtered.map(row => `<tr class="${row.delayed ? 'delayed-row' : ''}"><td data-label="Installment"><div>${paymentLoanId ? '' : `<strong>${esc(row.loan.name)}</strong><br>`}Month ${row.number}</div></td><td data-label="Due date">${dateText(row.due)}</td><td data-label="Scheduled">${money(row.dueAmount, row.loan.currency)}</td><td data-label="Received"><div>${money(row.paid, row.loan.currency)}<small class="block">${row.paidDate ? dateText(row.paidDate) : ''}</small></div></td><td data-label="Remaining">${money(row.remaining, row.loan.currency)}</td><td data-label="Status"><div>${statusBadge(row.status)}${row.lateDays ? `<small class="block">${row.lateDays} days late</small>` : ''}</div></td><td data-label="Action">${actionButton('receipt', row.loan.id, row.paid ? 'Edit payment' : 'Record payment', `data-number="${row.number}"`)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No installments match this view.</td></tr>';
 }
 function openReceipt(id, number) {
+  requireSession(); receiptDirty = false;
   const loan = loans.find(item => item.id === id), row = rowsFor(loan)[number - 1];
   $('#receiptForm').dataset.loan = id; receiptNumber = number;
   $('#receiptTitle').textContent = row.paid ? 'Edit payment' : 'Record payment';
@@ -192,14 +213,14 @@ $('#receiptForm').addEventListener('submit', async event => {
     const updated = structuredClone(loan);
     if (amount) updated.payments[receiptNumber] = { amount, date }; else delete updated.payments[receiptNumber];
     C.validateLoan(updated); await persist(loans.map(item => item.id === loan.id ? updated : item), generation);
-    renderPayments(); $('#receiptModal').close(); toast('Payment record saved.');
+    receiptDirty = false; renderPayments(); $('#receiptModal').close(); toast('Payment record saved.');
   } catch (error) { showError('#receiptError', error.message); }
   finally { submit.disabled = false; }
 });
 async function deleteLoan(id) {
   const generation = appEpoch;
   const loan = loans.find(item => item.id === id);
-  if (!await confirmAction('Delete borrower & loan?', `Delete ${loan.name}, their loan, payment records and attached documents from this device? You can undo the last deletion in Settings until this page is reloaded.`, 'Delete borrower')) return;
+  if (!await confirmAction('Delete borrower & loan?', `Delete ${loan.name}, their loan, payment records and attached documents from the current portfolio? You can undo the last deletion in Settings until you sign out or reload. ${LoanAccount.hasRecovery() ? 'Earlier raw migration copies may still contain this borrower; remove those separately in Settings. ' : ''}Downloaded backups are not changed.`, 'Delete borrower')) return;
   await persist(loans.filter(item => item.id !== id), generation); deletedLoan = loan; toast('Borrower deleted. Undo is available in Settings.');
 }
 function download(data, name, type) {
@@ -212,10 +233,12 @@ function downloadDocument(id, index) {
   download(bytes, doc.name, prefix.slice(5, prefix.indexOf(';')));
 }
 function utility(kind) {
-  const titles = { reminders: 'Payment reminders', documents: 'Borrower documents', reports: 'Export reports', settings: 'Settings & backup' };
+  if (kind !== 'privacy') requireSession();
+  const titles = { reminders: 'Payment reminders', documents: 'Borrower documents', reports: 'Export reports', settings: 'Settings & backup', privacy: 'How your data is stored' };
   if (kind === 'repayments') { openPayments(); return; }
   $('#utilityTitle').textContent = titles[kind];
   const container = $('#utilityContent');
+  if (kind === 'privacy') container.innerHTML = '<div class="privacy-notes"><p class="handwritten">Your notebook stays with you.</p><h3>On this device, in this browser</h3><p>Your profile, borrowers, repayments and attached documents are encrypted in browser storage after you create a local profile. They are not sent to a shared database. The website host receives normal page requests, including connection information such as your IP address.</p><h3>Keep your own backup</h3><p>Clearing site data, using private browsing or losing this device can lose your records. Save encrypted backups and keep their password safe. There is no email reset or automatic sync.</p><h3>You control what leaves the notebook</h3><p>Encrypted backups need their password. CSV, Excel and downloaded documents are not encrypted. Share those files carefully. Earlier migration copies can be removed from Settings without changing your current portfolio.</p><h3>Deleting your data</h3><p>Settings has a password-confirmed Delete local profile option. It removes Lendwise data from this browser only—not exported files, other devices or system backups. Removing browser keys is not a guarantee of forensic erasure.</p><h3>Security boundaries</h3><p>Encryption does not protect an unlocked session from malicious scripts, extensions or someone using your device. Use a strong password and a trusted, updated device. This app has automated tests, not an independent security certification.</p><p class="hint">This is a local recordkeeping tool, not a lender or payment service. These notes explain the current web app; a separate store privacy policy and Android review are still needed before a Google Play release.</p></div>';
   if (kind === 'reports') container.innerHTML = '<p>Export all borrowers and every scheduled monthly installment, across all currencies.</p><p class="hint">Includes contact details, loan terms, due dates, received amounts and dates, balances, status and days late. CSV stores status text; Excel highlights overdue and paid-late rows in red. Status is a snapshot at export time.</p><p class="notice">CSV, Excel and downloaded documents are not password-protected. Anyone with those files can read them. Store and share them carefully.</p><div class="button-row"><button class="secondary" data-export="csv">Download detailed CSV</button><button class="primary" data-export="xlsx">Download Excel (.xlsx)</button></div>';
   if (kind === 'documents') container.innerHTML = loans.flatMap(loan => loan.documents.map((doc, i) => `<div class="document-row"><div><strong>${esc(loan.name)}</strong><small class="block">${esc(doc.name)}</small></div>${actionButton('document', loan.id, 'Download', `data-index="${i}"`)}</div>`)).join('') || '<p class="empty">No documents saved. Add them when creating or editing a borrower.</p>';
   if (kind === 'reminders') {
@@ -224,6 +247,7 @@ function utility(kind) {
   }
   if (kind === 'settings') container.innerHTML = `<p>Your profile, loans and documents are encrypted in this browser on this device. There is no shared database, automatic backup, sync or email password reset. Your session locks after five minutes without activity and whenever this page reloads.</p><label class="setting-label">Portfolio currency<select id="settingsCurrency">${optionMarkup}</select></label><p class="hint">This filters totals and sets the default for new loans. Existing loan amounts keep their own currency.</p><div class="button-row"><button class="primary" id="backupBtn">Download encrypted backup</button><button class="secondary" id="changePasswordBtn">Change password</button>${deletedLoan ? '<button class="secondary" id="undoDelete">Undo last deletion</button>' : ''}</div><label class="setting-label">Restore a Lendwise JSON backup<input id="restoreInput" type="file" accept="application/json,.json"></label><p class="hint">Restoring replaces this profile’s portfolio after confirmation, keeping this profile’s name and password. Encrypted backups require their original password. Older unencrypted version 3 backups are also supported. To move the whole profile to a new device, use Restore on its login screen.</p><p class="notice">Keep your password and backups safe. Clearing site data or uninstalling the browser may delete your records. Encryption protects saved data while locked; it cannot protect an unlocked session from malicious scripts, extensions or someone using your device. CSV, Excel and document downloads are not encrypted.</p>`;
   if (kind === 'settings') $('#settingsCurrency').value = currency;
+  if (kind === 'settings') container.insertAdjacentHTML('beforeend', `<section class="settings-section"><h3>Make it yours</h3><label class="check-label"><input type="checkbox" id="motionToggle" ${window.PaperUI?.enabled() ? 'checked' : ''}> Gentle notebook animations</label><p class="hint">Your device’s reduced-motion preference always takes priority.</p></section><section class="settings-section danger-zone"><h3>Privacy controls</h3>${LoanAccount.hasRecovery() ? '<p>Old migration copies are kept inside your encrypted profile. They may include previously deleted records.</p><button class="secondary" id="purgeRecoveryBtn">Remove old migration copies</button>' : '<p>No old migration copies are retained in this profile.</p>'}<p>Delete this local profile, including its loans, documents and all migration copies. Download a backup first if you need to keep anything.</p><button class="danger" id="deleteProfileBtn">Delete local profile</button></section>`);
   if (!$('#utilityModal').open) $('#utilityModal').showModal();
 }
 async function exportReport(type, button) {
@@ -245,10 +269,11 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('button');
   if (!button) return;
   try {
-    if (button.hasAttribute('data-close')) { button.closest('dialog').close(); return; }
+    if (button.hasAttribute('data-close')) { await closeEditor(button.closest('dialog')); return; }
     if (button.dataset.open) { $('#sidebar').classList.remove('open'); $('#menuBtn').setAttribute('aria-expanded', 'false'); utility(button.dataset.open); }
     if (button.dataset.export) await exportReport(button.dataset.export, button);
-    if (button.hasAttribute('data-remove-doc')) { documentsDraft.splice(Number(button.dataset.removeDoc), 1); renderDraftDocuments(); }
+    if (button.hasAttribute('data-remove-doc')) { documentsDraft.splice(Number(button.dataset.removeDoc), 1); loanDirty = true; renderDraftDocuments(); }
+    if (button.dataset.filter) { requireSession(); $('#statusFilter').value = button.dataset.filter; $('#searchInput').value = ''; page = 0; renderRows(); $('#borrowers').scrollIntoView({ block: 'start' }); $('#borrowers').focus({ preventScroll: true }); }
     const id = button.dataset.id;
     if (button.dataset.action === 'edit') openLoan(id);
     if (button.dataset.action === 'delete') await deleteLoan(id);
@@ -259,6 +284,8 @@ document.addEventListener('click', async event => {
       download(LoanAccount.backup(), `lendwise-encrypted-backup-${C.today()}.json`, 'application/json'); toast('Encrypted backup downloaded. Keep its password safe.');
     }
     if (button.id === 'changePasswordBtn') await LoanAccount.changePassword();
+    if (button.id === 'deleteProfileBtn') await LoanAccount.deleteProfile();
+    if (button.id === 'purgeRecoveryBtn') { await LoanAccount.purgeRecovery(); if (LoanAccount.isUnlocked()) utility('settings'); }
     if (button.id === 'undoDelete' && deletedLoan) { await persist([deletedLoan, ...loans]); deletedLoan = null; utility('settings'); toast('Last deleted borrower restored.'); }
   } catch (error) { toast(error.message); }
 });
@@ -267,6 +294,7 @@ document.addEventListener('change', async event => {
   try {
     if (input.id === 'settingsCurrency') setCurrency(input.value);
     if (input.id === 'remindersToggle') { localStorage.setItem('lendwiseReminders', input.checked ? 'on' : 'off'); remindersEnabled = input.checked; }
+    if (input.id === 'motionToggle') window.PaperUI?.setEnabled(input.checked);
     if (input.id === 'restoreInput' && input.files[0]) {
       const generation = appEpoch;
       if (input.files[0].size > 20 * 1024 * 1024) throw new Error('Backup is too large (maximum 20 MB).');
@@ -289,17 +317,26 @@ $('#searchInput').oninput = () => { page = 0; renderRows(); };
 $('#statusFilter').onchange = $('#sortSelect').onchange = () => { page = 0; renderRows(); };
 $('#prevPage').onclick = () => { page--; renderRows(); }; $('#nextPage').onclick = () => { page++; renderRows(); };
 $('#chartPeriod').onchange = () => renderChart(entries()); form.addEventListener('input', previewPayment); form.elements.repaymentMode.addEventListener('change', previewPayment);
+// Repayment controls are added without changing the existing table or its export order.
+$('#paymentsModal .table-scroll').insertAdjacentHTML('beforebegin', '<div class="payment-toolbar"><label>Show installments <select id="paymentStatusFilter"><option value="all">All installments</option><option value="open">Unpaid & partial</option><option value="overdue">Overdue only</option><option value="paid">Paid installments</option></select></label><span id="paymentFilterCount" aria-live="polite"></span></div>');
+$('#paymentStatusFilter').onchange = renderPayments;
+form.addEventListener('input', () => { loanDirty = true; }); form.addEventListener('change', () => { loanDirty = true; });
+$('#receiptForm').addEventListener('input', () => { receiptDirty = true; });
+for (const id of ['loanModal', 'receiptModal']) $('#' + id).addEventListener('cancel', event => { event.preventDefault(); void closeEditor(event.currentTarget); });
 window.addEventListener('focus', () => { if (LoanAccount.isUnlocked()) { render(); if ($('#paymentsModal').open) renderPayments(); } });
 LoanAccount.start({
   validate: validateCollection, confirm: confirmAction, download, notice: toast,
+  resetPreferences: () => { currency = 'USD'; remindersEnabled = true; $('#currencySelect').value = currency; window.PaperUI?.reset(); },
   unlock: items => {
     appEpoch++; loans = items; page = 0; render();
     if (remindersEnabled && entries().some(row => row.remaining > 0 && C.daysBetween(C.today(), row.due) <= 7)) toast('Payments need attention. Open Reminders to view them.');
   },
   lock: () => {
-    appEpoch++; loans = []; documentsDraft = []; deletedLoan = null; editingId = paymentLoanId = receiptNumber = null;
+    appEpoch++; loans = []; documentsDraft = []; deletedLoan = null; loanDirty = receiptDirty = false; editingId = paymentLoanId = receiptNumber = null;
     form.reset(); $('#receiptForm').reset(); $('#searchInput').value = ''; $('#profileLabel').textContent = '';
-    for (const id of ['paymentRows', 'paymentsTitle', 'receiptSummary', 'utilityContent', 'existingDocuments', 'confirmText', 'toastText', 'paymentPreview', 'scheduleTotalPreview', 'repaymentHint', 'loanError', 'receiptError']) $('#' + id).textContent = '';
+    $('#sidebar').classList.remove('open'); $('#menuBtn').setAttribute('aria-expanded', 'false');
+    $('#statusFilter').value = 'all'; $('#sortSelect').value = 'newest';
+    for (const id of ['paymentRows', 'paymentFilterCount', 'paymentsTitle', 'receiptSummary', 'utilityContent', 'existingDocuments', 'confirmText', 'toastText', 'paymentPreview', 'scheduleTotalPreview', 'repaymentHint', 'loanError', 'receiptError']) $('#' + id).textContent = '';
     $('#toast').classList.remove('show'); clearTimeout(toastTimer); render();
   }
 });

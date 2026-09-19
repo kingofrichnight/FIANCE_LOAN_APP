@@ -74,6 +74,39 @@
       session = { ...active, payload, record };
     });
   }
+  function hasRecovery() {
+    return !!session && ['legacyRecovery', 'importedLegacyRecovery'].some(field => session.payload[field] && Object.values(session.payload[field]).some(value => value !== null));
+  }
+  async function purgeRecovery() {
+    if (!session || !hasRecovery()) return;
+    const active = session, generation = epoch, expected = snapshot;
+    if (!await handlers.confirm('Remove old migration copies?', 'Keep your current borrowers and payments, but remove the old raw migration copies from this encrypted profile. Those copies may contain older deleted records. Download a backup first if you need that history. Existing downloaded backups are not changed.', 'Remove old copies')) return;
+    await exclusive(async () => {
+      if (epoch !== generation || localStorage.getItem(STORE) !== expected) throw new Error('The profile changed. Unlock it again before removing copies.');
+      const { legacyRecovery, importedLegacyRecovery, ...payload } = active.payload;
+      // Do not discard a recovery copy while its unencrypted original is still present.
+      cleanupLegacy(legacyRecovery); cleanupLegacy(importedLegacyRecovery);
+      if (OLD.some(key => localStorage.getItem(key) !== null)) throw new Error('Old unencrypted data is still present. Close older app tabs, sign out, and unlock before removing recovery copies.');
+      const record = await LoanVault.seal(payload, active.key, active.salt);
+      snapshot = write(expected, record, generation); session = { ...active, payload, record };
+    });
+    handlers.notice('Old migration copies removed. Current borrowers and payments are unchanged.');
+  }
+  async function deleteProfile() {
+    if (!session) throw new Error('Unlock the profile before deleting it.');
+    const generation = epoch, expected = snapshot;
+    const values = await askPassword('Confirm your password to delete this profile');
+    if (!values) return;
+    await LoanVault.unlock(expected, values.password);
+    if (!await handlers.confirm('Permanently delete this local profile?', 'Delete this profile, all borrowers, payments, documents, migration copies and Lendwise preferences from this browser only? This cannot be undone here. Download an encrypted backup first. Copies you downloaded or restored on other devices are not deleted.', 'Delete profile permanently')) return;
+    await exclusive(async () => {
+      if (epoch !== generation || localStorage.getItem(STORE) !== expected) throw new Error('The profile changed. Unlock it again before deleting.');
+      // Exact app-owned keys only. Never clear unrelated sites sharing this origin.
+      for (const key of [...OLD, 'lendwiseCurrency', 'lendwiseReminders', 'lendwiseMotion']) localStorage.removeItem(key);
+      localStorage.removeItem(STORE);
+      handlers.resetPreferences(); lock('Local profile deleted from this browser. Downloaded backups and other devices are unchanged.');
+    });
+  }
   // Old records are copied inside the encrypted payload before removing their plaintext keys.
   // They are only removed when unchanged since the migration snapshot.
   function cleanupLegacy(recovery) {
@@ -112,7 +145,7 @@
         enter(opened, raw);
       });
     } catch (reason) { error(reason.message); }
-    finally { form.elements.password.value = ''; form.elements.confirmPassword.value = ''; $('#authSubmit').disabled = false; }
+    finally { form.elements.password.value = ''; form.elements.confirmPassword.value = ''; $('#authSubmit').disabled = !root.crypto?.subtle || !navigator.locks; }
   }
   function askPassword(title, changing = false) {
     const dialog = $('#passwordModal'), form = $('#passwordForm');
@@ -147,6 +180,7 @@
     return raw;
   }
   async function decodeBackup(data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Choose a valid Lendwise JSON backup.');
     if (data.format !== LoanVault.FORMAT) return data;
     const values = await askPassword('Enter this backup’s password');
     if (!values) return null;
@@ -186,9 +220,10 @@
       } catch (reason) { error(reason.message); }
     };
     document.addEventListener('pointerdown', activity, true); document.addEventListener('keydown', activity, true);
+    document.addEventListener('scroll', activity, { capture: true, passive: true });
     window.addEventListener('focus', () => { if (session && Date.now() - lastActivity >= IDLE_MS) lock('Session timed out. Unlock your profile again.'); });
     window.addEventListener('pagehide', () => lock('Unlock your local profile to continue.'));
     window.addEventListener('storage', event => { if ((event.key === STORE || event.key === null) && session) lock('Profile storage changed in another tab. Unlock again to load the saved version.'); });
   }
-  root.LoanAccount = { start, save, lock, backup, decodeBackup, changePassword, isUnlocked: () => session !== null };
+  root.LoanAccount = { start, save, lock, backup, decodeBackup, changePassword, deleteProfile, hasRecovery, purgeRecovery, isUnlocked: () => session !== null };
 })(globalThis);

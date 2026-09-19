@@ -61,6 +61,28 @@ test('custom monthly plans use the exact entered due for every month, independen
   assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: NaN })));
   assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: 80, payments: { 1: { amount: 100, date: '2026-01-31' } } })));
 });
+
+test('malformed imports are rejected rather than silently changing loan terms', () => {
+  for (const bad of [null, [], false, 'borrower']) assert.throws(() => C.migrate([bad]));
+  for (const fields of [{ months: 0 }, { months: '' }, { amount: true }, { currency: '' }, { amount: 10.001 }, { payments: false }]) assert.throws(() => C.migrate([loan(fields)]));
+  assert.equal(C.migrate([loan({ months: undefined })])[0].months, 12);
+  assert.equal(C.migrate([loan({ months: '3', amount: '150.25', rate: '0' })])[0].months, 3);
+});
+
+test('sub-cent, future-dated, and unsafe total payment values are rejected', () => {
+  assert.throws(() => C.validateLoan(loan({ payments: { 1: { amount: 0.001, date: '2026-01-01' } } })));
+  assert.throws(() => C.validateLoan(loan({ payments: { 1: { amount: 10, date: '2199-01-01' } } })));
+  assert.throws(() => C.validateLoan(loan({ repaymentMode: 'custom', payment: 1e12, months: 600 })));
+});
+
+test('amortization reconciles principal over 192 combinations of amount, rate and term', () => {
+  for (const amount of [.01, 1, 5.55, 10.01, 1250.33, 99999.99, 1000000, 50000000]) for (const months of [1, 2, 3, 12, 60, 600]) for (const rate of [0, .01, 12, 100]) {
+    const rows = C.schedule(loan({ amount, months, rate }));
+    assert.equal(rows.length, months); assert.equal(rows.at(-1).balance, 0);
+    assert.ok(rows.every(row => row.dueAmount >= 0 && row.balance >= 0 && Number.isFinite(row.dueAmount)));
+    assert.ok(Math.abs(C.round(rows.reduce((sum, row) => sum + row.principal, 0)) - amount) < .01);
+  }
+});
 test('CSV includes all months and currencies, quotes multiline text and neutralizes formula injection', () => {
   const input = [loan({ name: '=HYPERLINK("bad")', address: 'Line 1,\nLine 2' }), loan({ id: 'other', currency: 'CNY' })];
   const rows = C.exportRows(input, '2026-06-01');
