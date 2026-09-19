@@ -1,6 +1,6 @@
 # Lendwise
 
-A static, device-local loan portfolio app published through GitHub Pages. The interface uses a pen-and-paper notebook theme, with a responsive phone layout, subtle button/dialog feedback and reduced-motion support. All fonts and decorative artwork use local fonts or CSS; there are no third-party font requests.
+A static, device-local loan portfolio app published through GitHub Pages. The interface uses a black-and-white comic-panel theme: plain outlined boxes, circular accents and angled dividers, without speech bubbles. Red is reserved for overdue payments and warnings. It includes a responsive phone layout, subtle button/dialog feedback and reduced-motion support. All fonts and decorative artwork use local fonts or CSS; there are no third-party font requests.
 
 ## Using the app
 

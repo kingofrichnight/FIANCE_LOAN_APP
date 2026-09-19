@@ -3,16 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#f6f1e6">
+  <meta name="theme-color" content="#ffffff">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Lendwise — Loan Portfolio</title>
-  <link rel="stylesheet" href="styles.css?v=6">
-  <script src="core.js?v=6" defer></script><script src="vault.js?v=6" defer></script><script src="account.js?v=6" defer></script><script src="export.js?v=6" defer></script><script src="app.js?v=6" defer></script><script src="paper.js?v=6" defer></script>
+  <link rel="stylesheet" href="styles.css?v=7">
+  <script src="core.js?v=7" defer></script><script src="vault.js?v=7" defer></script><script src="account.js?v=7" defer></script><script src="export.js?v=7" defer></script><script src="app.js?v=7" defer></script><script src="paper.js?v=7" defer></script>
 </head>
 <body>
   <section class="auth-screen" id="authScreen" aria-labelledby="authTitle">
-    <div class="auth-intro"><p class="eyebrow">LENDWISE / THE PERSONAL LEDGER</p><h2>A little order.<br> A clearer <em>picture.</em></h2><p>A quiet place for your loans, repayments and the people behind the numbers.</p><div class="paper-sketch" aria-hidden="true"><span class="sketch-caption">one month at a time</span><div class="sketch-sheet"><span>My loan notebook</span><i></i><i></i><i></i><b>✓ recorded &amp; remembered</b></div><div class="sketch-pencil"></div></div><p class="handwritten">Your notebook. Your device.</p><small>No shared database. No automatic sync.</small></div>
+    <div class="auth-intro comic-cover">
+      <p class="comic-caption">LENDWISE / THE PERSONAL LEDGER</p>
+      <div class="comic-title"><span class="comic-issue">A LITTLE ORDER. A CLEARER PICTURE.</span><h2>Every loan.<br> Every payment.<br> <em>Your story.</em></h2></div>
+      <div class="comic-small"><span class="circle-note">One month<br>at a time.</span><span class="comic-speedlines" aria-hidden="true"></span></div>
+      <div class="comic-splash"><div><p>Your notebook.<br>Your device.</p><small>No shared database.<br>No automatic sync.</small></div><span class="comic-check" aria-hidden="true">✓</span></div>
+    </div>
     <div class="auth-card"><div class="auth-brand"><span class="brand-mark">L</span><strong>Lendwise</strong><span>DEVICE-LOCAL</span></div>
       <h1 id="authTitle">Your private local portfolio</h1><p>Borrowers, payments and documents stay in this browser on this device. Your saved profile is encrypted with your password.</p>
       <p id="authError" class="notice error" role="alert" hidden></p>
