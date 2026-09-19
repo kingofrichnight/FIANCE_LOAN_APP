@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f8faf8">
+  <title>Lendwise — Loan Portfolio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#"><span class="brand-mark">L</span><span>Lendwise</span></a>
+      <nav aria-label="Main navigation">
+        <p class="nav-label">WORKSPACE</p>
+        <a class="nav-item active" href="#"><span>⌂</span>Overview</a>
+        <a class="nav-item" href="#borrowers"><span>♙</span>Borrowers <b>24</b></a>
+        <a class="nav-item" href="#"><span>▤</span>Repayments</a>
+        <a class="nav-item" href="#"><span>◷</span>Reminders <i>3</i></a>
+        <p class="nav-label">MANAGE</p>
+        <a class="nav-item" href="#"><span>▣</span>Documents</a>
+        <a class="nav-item" href="#"><span>↗</span>Reports</a>
+        <a class="nav-item" href="#"><span>⚙</span>Settings</a>
+      </nav>
+      <div class="sidebar-card">
+        <span class="sparkle">✦</span>
+        <strong>Stay on top of every payment</strong>
+        <p>Enable reminders to get notified 7 days before.</p>
+        <button id="enableAlerts">Enable reminders</button>
+      </div>
+      <div class="account"><div class="avatar">JM</div><div><strong>James Morgan</strong><small>Portfolio manager</small></div><button>•••</button></div>
+    </aside>
+
+    <main>
+      <header>
+        <button class="menu-btn" id="menuBtn" aria-label="Toggle menu">☰</button>
+        <label class="search"><span>⌕</span><input id="searchInput" placeholder="Search borrowers, loans..." /></label>
+        <div class="header-actions"><button class="icon-btn" aria-label="Notifications">♢<span></span></button><button class="primary" id="newLoanTop">＋ New loan</button></div>
+      </header>
+
+      <div class="page">
+        <section class="hero-row">
+          <div><p class="eyebrow">SATURDAY, SEPTEMBER 19</p><h1>Good morning, James.</h1><p>Here’s what’s happening with your portfolio today.</p></div>
+          <div class="hero-actions"><button class="secondary" id="exportBtn">⇩ Export report</button><button class="primary" id="newLoanHero">＋ New loan</button></div>
+        </section>
+
+        <section class="metrics">
+          <article><div class="metric-head"><span class="metric-icon green">↗</span><span class="change positive">↗ 8.2%</span></div><p>Total outstanding</p><h2 id="totalOutstanding">$128,450</h2><small>Across 24 active loans</small></article>
+          <article><div class="metric-head"><span class="metric-icon blue">◎</span><span class="change positive">↗ 12.4%</span></div><p>Collected this month</p><h2>$18,320</h2><small>82% of $22,400 expected</small></article>
+          <article><div class="metric-head"><span class="metric-icon amber">◷</span><span class="change neutral">6 upcoming</span></div><p>Due in next 7 days</p><h2>$7,840</h2><small>From 6 repayments</small></article>
+          <article><div class="metric-head"><span class="metric-icon rose">!</span><span class="change negative">3 overdue</span></div><p>Overdue amount</p><h2>$3,250</h2><small>Needs your attention</small></article>
+        </section>
+
+        <section class="dashboard-grid">
+          <article class="panel collection-card"><div class="panel-title"><div><h3>Collection overview</h3><p>Monthly expected vs collected</p></div><select><option>Last 6 months</option></select></div><div class="chart-wrap"><div class="y-axis"><span>$25k</span><span>$20k</span><span>$15k</span><span>$10k</span><span>$5k</span><span>$0</span></div><div class="chart" id="chart"></div></div><div class="legend"><span><i class="dot expected"></i>Expected</span><span><i class="dot collected"></i>Collected</span></div></article>
+          <article class="panel upcoming"><div class="panel-title"><div><h3>Upcoming repayments</h3><p>Next 7 days</p></div><a href="#">View all →</a></div><div id="upcomingList"></div></article>
+        </section>
+
+        <section class="panel borrowers" id="borrowers">
+          <div class="panel-title"><div><h3>Borrowers</h3><p>Manage your active loan accounts</p></div><div class="table-actions"><button>☷ Filter</button><button>↕ Sort</button><button class="primary" id="addBorrower">＋ Add borrower</button></div></div>
+          <div class="table-scroll"><table><thead><tr><th>BORROWER</th><th>LOAN AMOUNT</th><th>MONTHLY PAYMENT</th><th>NEXT DUE</th><th>PROGRESS</th><th>SCORE</th><th>STATUS</th><th></th></tr></thead><tbody id="borrowerRows"></tbody></table></div>
+          <div class="table-footer"><span id="tableCount">Showing 5 of 24 borrowers</span><div><button disabled>←</button><button>→</button></div></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="loanModal"><form method="dialog" id="loanForm"><div class="modal-head"><div><h2>Add a new borrower</h2><p>Create their profile and repayment plan.</p></div><button class="close" value="cancel" aria-label="Close">×</button></div><div class="form-grid">
+    <label>Full name<input required name="name" placeholder="e.g. Maya Patel"></label><label>Phone number<input required name="phone" placeholder="+1 555 000 0000"></label>
+    <label>Loan amount ($)<input required min="1" type="number" name="amount" placeholder="10000"></label><label>Repayment term (months)<input required min="1" type="number" name="months" placeholder="12"></label>
+    <label>Annual interest rate (%)<input required min="0" step="0.1" type="number" name="rate" placeholder="8.5"></label><label>First payment date<input required type="date" name="due"></label>
+    <label class="full">Home address<input name="address" placeholder="Street, city, state"></label><label>Referrer<input name="referrer" placeholder="Name of referrer"></label><label>Family contact<input name="family" placeholder="Name and phone"></label>
+    <label class="full upload">Documents (PDF or images)<input type="file" name="documents" accept=".pdf,image/*" multiple><span>⌑ Choose borrower documents</span></label>
+  </div><div class="calculation"><span>Estimated monthly payment</span><strong id="paymentPreview">$0.00</strong></div><div class="modal-actions"><button value="cancel">Cancel</button><button class="primary" value="default" id="saveLoan">Save borrower & loan</button></div></form></dialog>
+  <div class="toast" id="toast"><span>✓</span><div><strong>Done</strong><small id="toastText">Your changes were saved.</small></div></div>
+  <script src="app.js"></script>
+</body>
+</html>
