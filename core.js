@@ -4,6 +4,20 @@
   const round = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
   const iso = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const today = () => iso(new Date());
+  function matchesBorrower(loan, query) {
+    const fold = value => String(value ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+      .replace(/[\u0660-\u0669\u06f0-\u06f9\u0966-\u096f]/g, char => String(char.charCodeAt(0) - (char <= '\u0669' ? 0x660 : char <= '\u06f9' ? 0x6f0 : 0x966)));
+    const needle = fold(query).trim();
+    if (!needle) return true;
+    const name = fold(loan.name).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const words = needle.replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    if (words.length && (words.every(word => name.includes(word)) || name.replaceAll(' ', '').includes(words.join('')))) return true;
+    if (/^[+()\d\s.\-]+$/.test(needle)) {
+      const digits = needle.replace(/\D/g, '');
+      return digits.length > 0 && fold(loan.phone).replace(/\D/g, '').includes(digits);
+    }
+    return !words.length && fold(loan.name).includes(needle);
+  }
   function parseDate(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null;
     const [y, m, d] = value.split('-').map(Number);
@@ -113,7 +127,7 @@
     return `"${text.replaceAll('"', '""')}"`;
   }
   const csv = (loans, asOf) => '\uFEFF' + [headers, ...exportRows(loans, asOf)].map(row => row.map(csvCell).join(',')).join('\r\n');
-  const api = { currencies, round, iso, today, parseDate, monthDate, daysBetween, payment, repaymentMode, schedule, repaymentScore, validateLoan, migrate, headers, exportRows, csv };
+  const api = { currencies, round, iso, today, matchesBorrower, parseDate, monthDate, daysBetween, payment, repaymentMode, schedule, repaymentScore, validateLoan, migrate, headers, exportRows, csv };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LoanCore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -8,6 +8,28 @@ test('monthly dates retain original day across leap years and year boundaries', 
   assert.equal(C.monthDate('2026-12-31', 1), '2027-01-31');
   assert.equal(C.parseDate('2026-02-30'), null);
 });
+
+test('borrower search handles case, accents, extra spaces, punctuation and name-word order', () => {
+  const input = loan({ name: 'José André O’Connor' });
+  for (const query of ['jose', ' JOSÉ    andré ', 'andre jose', 'oconnor', 'O Connor', '', '   ']) assert.equal(C.matchesBorrower(input, query), true, query);
+  for (const query of ['unrelated', 'jose missing', '=HYPERLINK']) assert.equal(C.matchesBorrower(input, query), false, query);
+  assert.equal(C.matchesBorrower(loan({ name: '李小明' }), '小明'), true);
+});
+
+test('phone search ignores formatting and accepts local/country-code digits and common digit scripts', () => {
+  const input = loan({ phone: '+91 (987) 654-3210' });
+  for (const query of ['9876543210', '+919876543210', '(987) 654-3210', '٩٨٧٦٥٤٣٢١٠', '۹۸۷۶۵۴۳۲۱۰', '९८७६५४३२१०', '９８７６５４３２１０']) assert.equal(C.matchesBorrower(input, query), true, query);
+  assert.equal(C.matchesBorrower(input, '99999999'), false);
+  assert.equal(C.matchesBorrower(input, '+'), false);
+});
+
+test('search remains literal, does not mix name tokens with phone digits, and leaves data unchanged', () => {
+  const input = loan({ name: 'Borrower 2', phone: '+91 9000000000' }), raw = JSON.stringify(input);
+  assert.equal(C.matchesBorrower(input, 'Borrower 1'), false);
+  assert.equal(C.matchesBorrower(input, '.*'), false);
+  assert.equal(C.matchesBorrower(loan({ name: 'Maya "Patel", 李 <b>' }), 'maya patel'), true);
+  assert.equal(JSON.stringify(input), raw);
+});
 test('zero-interest schedule reconciles cents and final principal balance', () => {
   const rows = C.schedule(loan({ amount: 1000, months: 3 }));
   assert.deepEqual(rows.map(r => r.dueAmount), [333.33, 333.33, 333.34]);

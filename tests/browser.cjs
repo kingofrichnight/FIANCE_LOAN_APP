@@ -126,6 +126,23 @@ async function main() {
     await click('Discard changes'); await hidden(page.locator('#loanModal'));
     await click('Review overdue loans ↗'); assert.equal(await page.locator('#statusFilter').inputValue(), 'overdue');
     await click('View active loans ↗'); assert.equal(await page.locator('#statusFilter').inputValue(), 'active'); await page.locator('#statusFilter').selectOption('all');
+    // Search must accept ordinary phone formatting and multi-space/case name input.
+    const beforeSearch = await page.evaluate(() => localStorage.getItem('lendwiseVaultV1'));
+    for (const query of ['+91 (900) 000-0000', '   mAya    patel   ']) {
+      await page.locator('#searchInput').fill(query);
+      assert.ok((await page.locator('#borrowerRows').textContent()).includes(name), `Borrower found for ${query}`);
+      assert.equal(await page.locator('#borrowersTitle').textContent(), 'Search results (1)');
+      assert.ok(await page.locator('#borrowers').evaluate(element => element.getBoundingClientRect().top < document.querySelector('.hero-row').getBoundingClientRect().top), 'Results appear above the unchanged dashboard');
+    }
+    const searchUrl = page.url();
+    await page.locator('#searchInput').press('Enter'); assert.equal(page.url(), searchUrl);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'borrowers');
+    await page.locator('#statusFilter').selectOption('paid');
+    assert.ok((await page.locator('#searchFeedbackText').textContent()).includes('1 hidden by the status filter'));
+    await click('Show all statuses'); await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
+    await click('Clear search'); assert.equal(await page.locator('#searchInput').inputValue(), '');
+    assert.equal(await page.locator('#borrowersTitle').textContent(), 'Borrowers');
+    assert.equal(await page.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeSearch);
     await page.locator('#searchInput').fill('missing name'); assert.ok((await page.locator('#borrowerRows').textContent()).includes('No borrowers match'));
     await page.locator('#searchInput').fill(''); await page.locator('#statusFilter').selectOption('paid'); assert.ok((await page.locator('#tableCount').textContent()).includes('0'));
     await page.locator('#statusFilter').selectOption('overdue'); await visible(page.locator('#borrowerRows').getByText(name, { exact: true }));
@@ -168,6 +185,28 @@ async function main() {
     assert.equal(await page.locator('#borrowerRows tr').count(), 8); await click('Next page'); assert.equal(await page.locator('#borrowerRows tr').count(), 2); await click('Previous page');
     await page.locator('#sortSelect').selectOption('amount'); await page.locator('#sortSelect').selectOption('due');
     await page.locator('#currencySelect').selectOption('CNY'); assert.equal(await page.locator('#borrowerRows tr').count(), 1); await page.locator('#currencySelect').selectOption('INR');
+    const beforeGlobalSearchTotal = await page.locator('#totalOutstanding').textContent();
+    await page.locator('#searchInput').fill('Borrower 9'); await click('Search');
+    await visible(page.locator('#borrowerRows').getByText('Borrower 9', { exact: true }));
+    assert.equal(await page.locator('#currencySelect').inputValue(), 'INR');
+    const yuanAmount = await page.evaluate(() => new Intl.NumberFormat(navigator.language, { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(1800));
+    assert.equal(await page.locator('#borrowerRows td[data-label=Loan] strong').textContent(), yuanAmount);
+    assert.equal(await page.locator('#totalOutstanding').textContent(), beforeGlobalSearchTotal);
+    assert.ok((await page.locator('#searchFeedbackText').textContent()).includes('Dashboard totals below remain in INR'));
+    await page.screenshot({ path: path.join(out, 'search-desktop.png'), animations: 'disabled' });
+    await page.locator('#searchInput').fill('Borrower'); await click('Next page');
+    await page.locator('#searchInput').fill('Borrower 9'); assert.equal(await page.locator('#prevPage').isDisabled(), true);
+    for (const width of [320, 390, 768, 1024]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.locator('#searchInput').fill('Borrower 9'); await click('Search');
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Search has no page overflow at ${width}px`);
+      assert.ok(await page.locator('#borrowersTitle').evaluate(element => { const bounds = element.getBoundingClientRect(); return bounds.top >= 0 && bounds.bottom <= innerHeight; }), `Search results visible at ${width}px`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#searchInput').fill('Borrower 9'); await click('Search'); await page.screenshot({ path: path.join(out, 'search-mobile.png'), animations: 'disabled' });
+    await page.locator('#searchInput').press('Escape'); assert.equal(await page.locator('#searchInput').inputValue(), '');
+    await hidden(page.locator('#searchFeedback'));
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('link', { name: 'Borrowers', exact: false }).click(); await page.getByRole('link', { name: 'Overview', exact: true }).click(); await page.getByRole('link', { name: 'L Lendwise', exact: true }).click();
     await page.getByRole('button', { name: 'Repayments', exact: true }).click(); await page.locator('#paymentsModal .close[data-close]').click();
     await page.getByRole('button', { name: 'Reports', exact: true }).click(); await page.locator('#utilityModal .close[data-close]').click();
@@ -307,6 +346,7 @@ async function main() {
     await migrating.clock.fastForward(301000);
     await hidden(migrating.locator('#appShell'));
     await hidden(migrating.locator('#scoreModal')); assert.equal(await migrating.locator('#scoreInstallments').textContent(), '');
+    assert.equal(await migrating.locator('#searchInput').inputValue(), ''); assert.equal(await migrating.locator('#searchFeedbackText').textContent(), '');
     assert.equal((await migrating.locator('body').textContent()).includes('Changed from another tab'), false);
     assert.equal(await migrating.evaluate(() => localStorage.getItem('lendwiseVaultV1')), beforeIdle);
     await migrating.setViewportSize({ width: 390, height: 844 });

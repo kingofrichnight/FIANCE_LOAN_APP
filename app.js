@@ -10,6 +10,9 @@ let currency = 'USD', remindersEnabled = true;
 const optionMarkup = Object.entries(C.currencies).map(([code, label]) => `<option value="${code}">${code} — ${label}</option>`).join('');
 $('#currencySelect').innerHTML = optionMarkup;
 $('#loanForm').elements.currency.innerHTML = optionMarkup;
+// Move the existing results section, rather than duplicating private borrower data.
+const borrowerHome = document.createComment('Borrower section home');
+$('#borrowers').before(borrowerHome);
 function money(value, code = currency) {
   return new Intl.NumberFormat(code === 'INR' ? 'en-IN' : navigator.language, { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
@@ -94,19 +97,31 @@ function render() {
   if ($('#scoreModal').open) renderScore();
 }
 function renderRows() {
-  const query = $('#searchInput').value.trim().toLocaleLowerCase();
+  const query = $('#searchInput').value.trim(), searching = query.length > 0;
   const filter = $('#statusFilter').value, sort = $('#sortSelect').value;
-  let list = chosenLoans().filter(loan => `${loan.name} ${loan.phone}`.toLocaleLowerCase().includes(query));
+  const matches = (searching ? loans : chosenLoans()).filter(loan => C.matchesBorrower(loan, query));
+  let list = matches;
   list = list.filter(loan => { const state = loanState(loan); return filter === 'all' || (filter === 'paid' ? !state.remaining : filter === 'overdue' ? state.status === 'Overdue' : state.remaining > 0); });
   if (sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name));
-  if (sort === 'amount') list.sort((a, b) => b.amount - a.amount);
+  if (sort === 'amount') list.sort((a, b) => (searching ? a.currency.localeCompare(b.currency) : 0) || b.amount - a.amount);
   if (sort === 'due') list.sort((a, b) => (loanState(a).next?.due || '9999').localeCompare(loanState(b).next?.due || '9999'));
+  if ($('#overview').classList.contains('searching') !== searching) {
+    $('#overview').classList.toggle('searching', searching);
+    if (searching) $('#storageError').after($('#borrowers')); else borrowerHome.after($('#borrowers'));
+  }
+  $('#borrowersTitle').textContent = searching ? `Search results (${list.length})` : 'Borrowers';
+  $('#borrowersSubtitle').textContent = searching ? 'Matching names and phone numbers across all currencies.' : 'Manage loan details and monthly payments';
+  $('#searchFeedback').hidden = !searching;
+  $('#searchFeedbackText').textContent = searching ? `${list.length} match${list.length === 1 ? '' : 'es'} for “${query}”. ${matches.length - list.length ? `${matches.length - list.length} hidden by the status filter. ` : ''}Each loan keeps its own currency. Dashboard totals below remain in ${currency}.` : '';
+  $('#resetSearchFilter').hidden = !searching || filter === 'all';
+  $('#clearSearch').hidden = $('#searchInput').value.length === 0;
+  $('#sortSelect option[value=amount]').textContent = searching ? 'Currency, then amount' : 'Largest loan';
   page = Math.max(0, Math.min(page, Math.ceil(list.length / pageSize) - 1));
   $('#borrowerRows').innerHTML = list.slice(page * pageSize, (page + 1) * pageSize).map(loan => {
     const state = loanState(loan);
     const progress = state.paid + state.remaining > 0 ? Math.round(state.paid / (state.paid + state.remaining) * 100) : 100;
-    return `<tr><td data-label="Borrower"><div class="person"><div><strong>${esc(loan.name)}</strong><small>${esc(loan.phone)}</small>${scoreButton(loan)}</div></div></td><td class="amount" data-label="Loan"><div><strong>${money(loan.amount)}</strong><small>${loan.months} months · ${loan.currency}</small></div></td><td data-label="Monthly payment">${money(state.rows[0].dueAmount)}</td><td data-label="Next due">${dateText(state.next?.due)}</td><td data-label="Received"><div>${money(state.paid)}<progress class="repayment-progress" value="${progress}" max="100" aria-label="${esc(loan.name)}: ${progress}% of scheduled repayments received"></progress><small class="block">${progress}% received</small></div></td><td data-label="Status">${statusBadge(state.status)}</td><td data-label="Actions"><div class="row-actions">${actionButton('payments', loan.id, 'Payments')}${actionButton('edit', loan.id, 'Edit')}${actionButton('delete', loan.id, 'Delete')}</div></td></tr>`;
-  }).join('') || `<tr><td colspan="7" class="empty">${loans.length ? 'No borrowers match this currency, search, or filter.' : 'No borrowers yet. Add your first borrower to begin.'}</td></tr>`;
+    return `<tr><td data-label="Borrower"><div class="person"><div><strong>${esc(loan.name)}</strong><small>${esc(loan.phone)}</small>${scoreButton(loan)}</div></div></td><td class="amount" data-label="Loan"><div><strong>${money(loan.amount, loan.currency)}</strong><small>${loan.months} months · ${loan.currency}</small></div></td><td data-label="Monthly payment">${money(state.rows[0].dueAmount, loan.currency)}</td><td data-label="Next due">${dateText(state.next?.due)}</td><td data-label="Received"><div>${money(state.paid, loan.currency)}<progress class="repayment-progress" value="${progress}" max="100" aria-label="${esc(loan.name)}: ${progress}% of scheduled repayments received"></progress><small class="block">${progress}% received</small></div></td><td data-label="Status">${statusBadge(state.status)}</td><td data-label="Actions"><div class="row-actions">${actionButton('payments', loan.id, 'Payments')}${actionButton('edit', loan.id, 'Edit')}${actionButton('delete', loan.id, 'Delete')}</div></td></tr>`;
+  }).join('') || `<tr><td colspan="7" class="empty">${loans.length ? (searching ? 'No borrowers match this search and status filter. Try another name or phone number.' : 'No borrowers match this currency or status filter.') : 'No borrowers yet. Add your first borrower to begin.'}</td></tr>`;
   $('#tableCount').textContent = list.length ? `Showing ${page * pageSize + 1}–${Math.min((page + 1) * pageSize, list.length)} of ${list.length}` : 'Showing 0 borrowers';
   $('#prevPage').disabled = page === 0;
   $('#nextPage').disabled = (page + 1) * pageSize >= list.length;
@@ -332,10 +347,26 @@ document.addEventListener('change', async event => {
 });
 ['newLoanTop', 'newLoanHero', 'addBorrower'].forEach(id => $('#' + id).addEventListener('click', () => openLoan()));
 $('#menuBtn').onclick = () => { const open = $('#sidebar').classList.toggle('open'); $('#menuBtn').setAttribute('aria-expanded', String(open)); };
-document.querySelectorAll('.sidebar a').forEach(link => link.onclick = () => { $('#sidebar').classList.remove('open'); $('#menuBtn').setAttribute('aria-expanded', 'false'); });
+function clearSearch(focus = true) {
+  $('#searchInput').value = ''; page = 0; renderRows();
+  if (focus) $('#searchInput').focus();
+}
+document.querySelectorAll('.sidebar a').forEach(link => link.onclick = () => { $('#sidebar').classList.remove('open'); $('#menuBtn').setAttribute('aria-expanded', 'false'); if (link.getAttribute('href') === '#overview') clearSearch(false); });
 $('#notificationsBtn').onclick = () => utility('reminders'); $('#exportBtn').onclick = () => utility('reports');
 $('#currencySelect').onchange = event => setCurrency(event.target.value);
-$('#searchInput').oninput = () => { page = 0; renderRows(); };
+const updateSearch = event => { if (!event?.isComposing) { page = 0; renderRows(); } };
+$('#searchInput').addEventListener('input', updateSearch);
+$('#searchInput').addEventListener('search', updateSearch);
+$('#searchInput').addEventListener('compositionend', updateSearch);
+$('#searchInput').addEventListener('keydown', event => { if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); clearSearch(); } });
+$('#clearSearch').onclick = () => clearSearch();
+$('#resetSearchFilter').onclick = () => { $('#statusFilter').value = 'all'; page = 0; renderRows(); $('#borrowers').focus({ preventScroll: true }); };
+$('#searchForm').addEventListener('submit', event => {
+  event.preventDefault(); if (!LoanAccount.isUnlocked()) return;
+  page = 0; renderRows();
+  ($('#searchInput').value.trim() ? document.querySelector('header') : $('#borrowers')).scrollIntoView({ block: 'start' });
+  $('#borrowers').focus({ preventScroll: true });
+});
 $('#statusFilter').onchange = $('#sortSelect').onchange = () => { page = 0; renderRows(); };
 $('#prevPage').onclick = () => { page--; renderRows(); }; $('#nextPage').onclick = () => { page++; renderRows(); };
 $('#chartPeriod').onchange = () => renderChart(entries()); form.addEventListener('input', previewPayment); form.elements.repaymentMode.addEventListener('change', previewPayment);

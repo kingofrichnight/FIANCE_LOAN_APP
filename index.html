@@ -7,8 +7,8 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Lendwise — Loan Portfolio</title>
-  <link rel="stylesheet" href="styles.css?v=8">
-  <script src="core.js?v=8" defer></script><script src="vault.js?v=8" defer></script><script src="account.js?v=8" defer></script><script src="export.js?v=8" defer></script><script src="app.js?v=8" defer></script><script src="paper.js?v=8" defer></script>
+  <link rel="stylesheet" href="styles.css?v=9">
+  <script src="core.js?v=9" defer></script><script src="vault.js?v=9" defer></script><script src="account.js?v=9" defer></script><script src="export.js?v=9" defer></script><script src="app.js?v=9" defer></script><script src="paper.js?v=9" defer></script>
 </head>
 <body>
   <section class="auth-screen" id="authScreen" aria-labelledby="authTitle">
@@ -50,7 +50,7 @@
     <main>
       <header>
         <button class="menu-btn" id="menuBtn" aria-label="Toggle menu" aria-expanded="false" aria-controls="sidebar">☰</button>
-        <label class="search"><span aria-hidden="true">⌕</span><input id="searchInput" aria-label="Search borrowers" placeholder="Search name or phone"></label>
+        <form class="search" id="searchForm" role="search" autocomplete="off"><label class="sr-only" for="searchInput">Search borrowers</label><input id="searchInput" type="search" placeholder="Search name or phone" enterkeyhint="search" maxlength="160" aria-controls="borrowers"><button id="clearSearch" type="button" aria-label="Clear search" hidden>×</button><button id="searchSubmit" type="submit">Search</button></form>
         <div class="header-actions"><select id="currencySelect" aria-label="Portfolio currency"></select><button class="icon-btn" id="notificationsBtn" aria-label="View reminders">♢</button><button class="primary" id="newLoanTop">＋ New loan</button></div>
       </header>
       <div class="page" id="overview">
@@ -68,7 +68,8 @@
           <article class="panel upcoming"><div class="panel-title"><div><h3>Payments needing attention</h3><p>Overdue and due in the next 7 days</p></div><button class="text-btn" data-open="repayments">View all</button></div><div id="upcomingList"></div></article>
         </section>
         <section class="panel borrowers" id="borrowers" tabindex="-1">
-          <div class="panel-title"><div><h3>Borrowers</h3><p>Manage loan details and monthly payments</p></div><div class="table-actions"><label><span class="sr-only">Filter borrowers</span><select id="statusFilter"><option value="all">All statuses</option><option value="overdue">Overdue</option><option value="active">Active</option><option value="paid">Paid off</option></select></label><label><span class="sr-only">Sort borrowers</span><select id="sortSelect"><option value="newest">Newest first</option><option value="name">Name A–Z</option><option value="amount">Largest loan</option><option value="due">Next due date</option></select></label><button class="primary" id="addBorrower">＋ Add borrower</button></div></div>
+          <div class="panel-title"><div><h3 id="borrowersTitle">Borrowers</h3><p id="borrowersSubtitle">Manage loan details and monthly payments</p></div><div class="table-actions"><label><span class="sr-only">Filter borrowers</span><select id="statusFilter"><option value="all">All statuses</option><option value="overdue">Overdue</option><option value="active">Active</option><option value="paid">Paid off</option></select></label><label><span class="sr-only">Sort borrowers</span><select id="sortSelect"><option value="newest">Newest first</option><option value="name">Name A–Z</option><option value="amount">Largest loan</option><option value="due">Next due date</option></select></label><button class="primary" id="addBorrower">＋ Add borrower</button></div></div>
+          <div id="searchFeedback" class="search-feedback" hidden><p id="searchFeedbackText" role="status" aria-live="polite" aria-atomic="true"></p><button id="resetSearchFilter" type="button" class="text-btn" hidden>Show all statuses</button></div>
           <div class="table-scroll"><table><thead><tr><th>BORROWER</th><th>LOAN</th><th>MONTHLY PAYMENT</th><th>NEXT DUE</th><th>RECEIVED</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="borrowerRows"></tbody></table></div>
           <div class="table-footer"><span id="tableCount"></span><div><button id="prevPage" aria-label="Previous page">←</button><button id="nextPage" aria-label="Next page">→</button></div></div>
         </section>

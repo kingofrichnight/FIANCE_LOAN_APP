@@ -105,9 +105,14 @@ p { margin: 0 0 12px; }
 .local-account button { width: 100%; font-size: 11px; }
 main { margin-left: var(--nav); }
 header { min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 36px; background: #fff; border-bottom: 2px solid var(--ink); }
-.search { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--blue); }
-.search span { font-size: 23px; }
-.search input { border: 0; border-bottom: 1px solid #777; background: transparent; border-radius: 0; font-size: 12px; width: 205px; }
+.search { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; max-width: 430px; color: var(--ink); }
+.search input { border: 0; border-bottom: 1px solid #777; background: transparent; border-radius: 0; font-size: 13px; flex: 1; width: 100%; min-width: 0; }
+.search input::-webkit-search-cancel-button { display: none; }
+.search button { flex-shrink: 0; font-size: 12px; min-height: 40px; padding: 8px 10px; }
+.search #clearSearch { border: 0; font-size: 22px; padding: 4px 7px; }
+.page.searching>#borrowers { margin-bottom: 30px; }
+.search-feedback { padding: 0 22px 17px; font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.search-feedback p { margin: 0; }.search-feedback button { margin-top: 5px; }
 .header-actions,.hero-actions,.table-actions { display: flex; gap: 10px; align-items: center; }
 .header-actions .primary { font-size: 12px; }
 #currencySelect { max-width: 174px; }
@@ -241,12 +246,12 @@ html[data-motion=off] *,html[data-motion=off] *::before,html[data-motion=off] *:
 }
 @media(max-width:900px) {
   .sidebar { display: none; width: 250px; top: 76px; box-shadow: 6px 6px 0 #0003; }.sidebar.open { display: flex; }.sidebar .brand { display: none; }
-  main { margin-left: 0; }.menu-btn { display: block; flex: 0 0 38px; font-size: 23px; padding: 3px; background: transparent; }.header-actions { margin-left: auto; }.search input { width: min(190px,24vw); }
+  main { margin-left: 0; }.menu-btn { display: block; flex: 0 0 38px; font-size: 23px; padding: 3px; background: transparent; }.header-actions { margin-left: auto; }
   .auth-screen { grid-template-columns: 1fr; max-width: 570px; padding: 35px 24px; gap: 36px; }
   .comic-cover { grid-template-columns: 1fr; grid-template-rows: auto auto; gap: 8px; }.comic-caption { padding: 7px 10px; }.comic-title { grid-column: 1; grid-row: 2; padding: 17px 20px; }.comic-title h2 { font-size: 32px; margin: 0; }.comic-title h2 br { display: none; }.comic-issue,.comic-small,.comic-splash { display: none; }
 }
 @media(max-width:650px) {
-  header { min-height: 120px; flex-wrap: wrap; gap: 8px; padding: 14px 16px; }.search { order: 3; width: 100%; }.search input { width: 100%; min-height: 36px; }.search span { font-size: 20px; }.header-actions { gap: 7px; }#currencySelect { max-width: 123px; font-size: 10px; min-height: 40px; padding: 6px; }.header-actions .primary { padding: 9px 10px; font-size: 11px; }.icon-btn { width: 34px; min-height: 40px; }
+  header { min-height: 120px; flex-wrap: wrap; gap: 8px; padding: 14px 16px; }.search { order: 3; width: 100%; flex-basis: 100%; max-width: none; }.search input { width: 100%; min-height: 40px; font-size: 16px; }.header-actions { gap: 7px; }#currencySelect { max-width: 123px; font-size: 10px; min-height: 40px; padding: 6px; }.header-actions .primary { padding: 9px 10px; font-size: 11px; }.icon-btn { width: 34px; min-height: 40px; }
   .sidebar { top: 120px; }.page { padding: 26px 16px; }.hero-row { padding: 20px 17px; }.hero-row h1 { font-size: 33px; }.hero-row .eyebrow { font-size: 9px; letter-spacing: 1.2px; }.hero-actions { width: 100%; }.hero-actions button { flex: 1; font-size: 11px; }.notebook-caption .handwritten { font-size: 10px; }.notebook-caption>span:first-child { letter-spacing: .8px; font-size: 8px; }
   .metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.metrics article { padding: 17px 13px 10px; }.metrics h2 { font-size: 22px; }.metrics small { font-size: 9px; }.metrics p { font-size: 10px; }.metric-link { font-size: 9px; }.panel { padding: 19px 16px; }.panel-title h3 { font-size: 22px; }.panel-title p { font-size: 10px; }.panel-title select { max-width: 117px; font-size: 10px; }
   .upcoming-row { grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding-block: 15px; }.upcoming-row>.row-btn { grid-column: 1/-1; justify-self: start; }
